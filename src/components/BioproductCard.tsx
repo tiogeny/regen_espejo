@@ -18,14 +18,15 @@ export const BioproductCard: React.FC<BioproductCardProps> = ({
   const currentProduct = products[currentIndex] || products[0];
   const [selectedIngredient, setSelectedIngredient] = useState<string | null>(null);
 
-  const size = 96;
-  const strokeWidth = 10;
+  const size = 80;
+  const strokeWidth = 8;
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
 
   let accumulatedPercent = 0;
 
-  const handleNext = () => {
+  const handleNext = (e: React.MouseEvent) => {
+    e.stopPropagation();
     onSelectProduct((currentIndex + 1) % products.length);
     setSelectedIngredient(null);
   };
@@ -33,21 +34,31 @@ export const BioproductCard: React.FC<BioproductCardProps> = ({
   const activeIngObj = currentProduct.ingredients.find((i) => i.id === selectedIngredient);
 
   return (
-    <div className="relative w-80 glass-panel rounded-3xl p-5 select-none shadow-[0_8px_32px_rgba(0,0,0,0.45)] border border-[#e1cd9f]/30">
-      <div className="mb-3">
-        <span className="block text-[10px] tracking-[0.25em] text-[#d4c5a9] font-medium uppercase opacity-85">
+    <div
+      onClick={(e) => e.stopPropagation()}
+      className="relative w-[285px] max-w-[85vw] glass-panel rounded-2xl p-3.5 select-none shadow-[0_8px_32px_rgba(0,0,0,0.5)] border border-[#e1cd9f]/30 pointer-events-auto"
+    >
+      {/* Encabezado */}
+      <div className="mb-2">
+        <span className="block text-[9.5px] tracking-[0.25em] text-[#d4c5a9] font-medium uppercase opacity-85">
           {currentProduct.title}
         </span>
-        <h2 className="text-xl font-light text-neutral-100 tracking-wide mt-0.5">
-          {currentProduct.name}
-        </h2>
-        <p className="text-xs text-[#c9b794] font-light mt-0.5">
+        <div className="flex items-baseline justify-between">
+          <h2 className="text-base font-light text-neutral-100 tracking-wide">
+            {currentProduct.name}
+          </h2>
+          <span className="text-[10px] text-[#dec39b]/80 font-mono">
+            pH {currentProduct.phTarget}
+          </span>
+        </div>
+        <p className="text-[11px] text-[#c9b794] font-light">
           {currentProduct.tagline}
         </p>
       </div>
 
-      <div className="flex items-center gap-4 py-1">
-        <div className="relative w-24 h-24 flex-shrink-0 flex items-center justify-center">
+      {/* Gráfico Donut y Lista de Ingredientes */}
+      <div className="flex items-center gap-3 py-0.5">
+        <div className="relative w-20 h-20 flex-shrink-0 flex items-center justify-center">
           <svg className="w-full h-full -rotate-90" viewBox={`0 0 ${size} ${size}`}>
             <circle
               cx={size / 2}
@@ -81,10 +92,10 @@ export const BioproductCard: React.FC<BioproductCardProps> = ({
             })}
           </svg>
 
-          <div className="absolute inset-0 m-auto w-12 h-12 rounded-full bg-[#1e231e] border border-[#d8be8a]/50 flex items-center justify-center shadow-inner">
+          <div className="absolute inset-0 m-auto w-10 h-10 rounded-full bg-[#1e231e] border border-[#d8be8a]/50 flex items-center justify-center shadow-inner">
             <svg
               viewBox="0 0 24 24"
-              className="w-5 h-5 stroke-[#e5cca0] fill-none"
+              className="w-4 h-4 stroke-[#e5cca0] fill-none"
               strokeWidth="1.6"
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -95,27 +106,28 @@ export const BioproductCard: React.FC<BioproductCardProps> = ({
           </div>
         </div>
 
-        <div className="flex-1 space-y-1.5">
+        {/* Lista de ingredientes y porcentajes */}
+        <div className="flex-1 space-y-1">
           {currentProduct.ingredients.map((ing) => (
             <div
               key={ing.id}
               onClick={() => setSelectedIngredient(selectedIngredient === ing.id ? null : ing.id)}
-              className={`flex items-center justify-between text-xs cursor-pointer rounded px-1.5 py-0.5 transition-all ${
+              className={`flex items-center justify-between text-[11px] cursor-pointer rounded px-1.5 py-0.5 transition-all ${
                 selectedIngredient === ing.id
-                  ? 'bg-amber-400/15 border border-amber-300/30'
+                  ? 'bg-amber-400/20 border border-amber-300/40'
                   : 'hover:bg-neutral-800/40'
               }`}
             >
               <div className="flex items-center gap-1.5 overflow-hidden">
                 <span
-                  className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                  className="w-2 h-2 rounded-full flex-shrink-0"
                   style={{ backgroundColor: ing.color }}
                 />
-                <span className="text-[11px] text-neutral-200 truncate font-light">
+                <span className="text-neutral-200 truncate font-light">
                   {ing.name}
                 </span>
               </div>
-              <span className="text-[11px] text-[#dec39b] font-mono font-medium pl-2">
+              <span className="text-[#dec39b] font-mono font-medium pl-1 text-[10.5px]">
                 {ing.percentage}%
               </span>
             </div>
@@ -123,28 +135,33 @@ export const BioproductCard: React.FC<BioproductCardProps> = ({
         </div>
       </div>
 
+      {/* Detalle emergente de ingrediente */}
       {activeIngObj && (
-        <div className="mt-3 p-2.5 rounded-xl bg-black/50 border border-amber-400/30 text-[11px] space-y-1 animate-fadeIn">
+        <div className="mt-2 p-2 rounded-xl bg-black/60 border border-amber-400/30 text-[10.5px] space-y-1 animate-fadeIn">
           <div className="flex items-center justify-between text-amber-200">
             <span className="font-semibold">{activeIngObj.name}</span>
-            <span className="italic opacity-80 text-[10px]">{activeIngObj.scientificName}</span>
+            <span className="italic opacity-75 text-[9.5px]">{activeIngObj.scientificName}</span>
           </div>
-          <p className="text-neutral-300 text-[10.5px] leading-tight">{activeIngObj.benefit}</p>
-          <div className="text-[9.5px] text-[#c9b794] pt-0.5">
+          <p className="text-neutral-300 text-[10px] leading-tight">{activeIngObj.benefit}</p>
+          <div className="text-[9px] text-[#c9b794]">
             📍 {activeIngObj.origin}
           </div>
         </div>
       )}
 
-      <div className="flex items-center justify-between mt-4 pt-2 border-t border-neutral-700/30">
-        <div className="flex items-center gap-1.5 pl-1">
+      {/* Pie con carrusel y acción */}
+      <div className="flex items-center justify-between mt-2.5 pt-2 border-t border-neutral-700/30">
+        <div className="flex items-center gap-1 pl-0.5">
           {products.map((p, idx) => (
             <button
               key={p.id}
-              onClick={() => onSelectProduct(idx)}
+              onClick={(e) => {
+                e.stopPropagation();
+                onSelectProduct(idx);
+              }}
               className={`h-1.5 rounded-full transition-all duration-300 ${
                 idx === currentIndex
-                  ? 'w-4 bg-[#dec39b]'
+                  ? 'w-3.5 bg-[#dec39b]'
                   : 'w-1.5 bg-neutral-600 hover:bg-neutral-400'
               }`}
               aria-label={`Ver ${p.name}`}
@@ -152,11 +169,14 @@ export const BioproductCard: React.FC<BioproductCardProps> = ({
           ))}
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           <button
-            onClick={() => onOpenDispenser(currentProduct)}
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenDispenser(currentProduct);
+            }}
             className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] bg-[#d9b77d]/20 hover:bg-[#d9b77d]/35 border border-[#d9b77d]/50 text-[#edd2aa] transition-all"
-            title="Generar orden de biofabricación"
+            title="Generar orden de biofabricación Fab Lab"
           >
             <Beaker className="w-3 h-3" />
             <span>Formular</span>
@@ -164,10 +184,10 @@ export const BioproductCard: React.FC<BioproductCardProps> = ({
 
           <button
             onClick={handleNext}
-            className="w-7 h-7 rounded-full bg-neutral-800/80 hover:bg-[#d9b77d]/30 border border-[#d9b77d]/40 flex items-center justify-center text-[#ebd1a8] transition-all hover:scale-105"
+            className="w-6 h-6 rounded-full bg-neutral-800/80 hover:bg-[#d9b77d]/30 border border-[#d9b77d]/40 flex items-center justify-center text-[#ebd1a8] transition-all hover:scale-105"
             aria-label="Siguiente bioproducto"
           >
-            <ArrowRight className="w-3.5 h-3.5 stroke-[2]" />
+            <ArrowRight className="w-3 h-3 stroke-[2]" />
           </button>
         </div>
       </div>

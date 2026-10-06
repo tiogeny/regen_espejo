@@ -1,9 +1,10 @@
-﻿import { useState, useRef, useMemo } from 'react';
+﻿import { useState, useRef, useMemo, useEffect, useCallback } from 'react';
 import { MirrorFrame } from './components/MirrorFrame';
 import { ControlsBar } from './components/ControlsBar';
 import { FabLabDispenserModal } from './components/FabLabDispenserModal';
 import { useWebcam } from './hooks/useWebcam';
 import { SKIN_PRESETS, INITIAL_PRODUCTS, calculateDynamicFormula } from './data/bioData';
+import { analyzeSkinRegion } from './utils/skinAnalyzer';
 import type { SkinMetrics, BioProduct, SkinType, ScanPoint } from './types';
 
 export function App() {
@@ -16,10 +17,16 @@ export function App() {
     label: 'Pómulo derecho',
   });
 
-  const [useCamera, setUseCamera] = useState(false);
+  // Cámara activa por defecto para que inicie inmediatamente
+  const [useCamera, setUseCamera] = useState(true);
   const [lightTone, setLightTone] = useState<'warm' | 'neutral' | 'cool' | 'off'>('warm');
-  const [lightBrightness, setLightBrightness] = useState(80);
+  const [lightBrightness, setLightBrightness] = useState(85);
   const [dispenserProduct, setDispenserProduct] = useState<BioProduct | null>(null);
+
+  // Estados de escaneo óptico por IA (0 tokens, client-side)
+  const [isScanning, setIsScanning] = useState(false);
+  const [macroImage, setMacroImage] = useState<string | undefined>(undefined);
+  const [scanMessage, setScanMessage] = useState<string | null>(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   useWebcam(videoRef, useCamera);
@@ -30,6 +37,50 @@ export function App() {
     list[0] = calculateDynamicFormula(metrics);
     return list;
   }, [metrics]);
+
+  // Ejecutar análisis óptico en los píxeles de la cámara web
+  const performOpticalScan = useCallback(() => {
+    if (!videoRef.current || !useCamera) {
+      setScanMessage('Modo simulación (sin cámara)');
+      return;
+    }
+
+    setIsScanning(true);
+    setScanMessage('Calibrando sensores ópticos...');
+
+    setTimeout(() => {
+      setScanMessage('Midiendo reflectancia sebácea y poros...');
+    }, 800);
+
+    setTimeout(() => {
+      if (videoRef.current) {
+        const result = analyzeSkinRegion(
+          videoRef.current,
+          activeScanPoint.x,
+          activeScanPoint.y
+        );
+
+        if (result) {
+          setMetrics(result.metrics);
+          setSelectedSkinType(result.metrics.skinType);
+          setMacroImage(result.macroImageDataUrl);
+          setScanMessage(`¡Piel ${result.metrics.skinType} detectada! Fórmula ajustada.`);
+        }
+      }
+      setIsScanning(false);
+      setTimeout(() => setScanMessage(null), 3000);
+    }, 1800);
+  }, [activeScanPoint, useCamera]);
+
+  // Si la cámara se enciende por primera vez, hacer un escaneo inicial suave
+  useEffect(() => {
+    if (useCamera && videoRef.current) {
+      const timer = setTimeout(() => {
+        performOpticalScan();
+      }, 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [useCamera, performOpticalScan]);
 
   const handleSelectSkinType = (type: SkinType) => {
     setSelectedSkinType(type);
@@ -46,6 +97,24 @@ export function App() {
     }));
   };
 
+  // Clic en cualquier punto del rostro dentro del espejo
+  const handleMirrorClick = (xPercent: number, yPercent: number) => {
+    const zoneName = yPercent < 36 ? 'Frente / Zona T' : yPercent > 52 ? 'Barbilla' : 'Pómulo';
+    setActiveScanPoint({
+      x: xPercent,
+      y: yPercent,
+      label: zoneName,
+    });
+
+    // Muestrear de inmediato los nuevos píxeles
+    if (videoRef.current && useCamera) {
+      const res = analyzeSkinRegion(videoRef.current, xPercent, yPercent);
+      if (res) {
+        setMacroImage(res.macroImageDataUrl);
+      }
+    }
+  };
+
   const handleToggleFullscreen = () => {
     if (!document.fullscreenElement) {
       document.documentElement.requestFullscreen().catch(() => {});
@@ -55,24 +124,35 @@ export function App() {
   };
 
   return (
-    <div className="relative min-h-screen bg-[#070908] text-neutral-100 flex flex-col justify-center items-center overflow-hidden selection:bg-[#d9b77d]/30">
-      <div className="fixed inset-0 pointer-events-none bg-[radial-gradient(circle_at_50%_35%,rgba(217,183,125,0.06)_0%,rgba(0,0,0,0.95)_75%)]" />
+    <div className="relative h-screen max-h-screen w-screen overflow-hidden bg-[#070908] text-neutral-100 flex flex-col justify-between items-center select-none">
+      {/* Fondo con viñeta de iluminación ambiental */}
+      <div className="fixed inset-0 pointer-events-none bg-[radial-gradient(circle_at_50%_40%,rgba(217,183,125,0.06)_0%,rgba(0,0,0,0.95)_75%)]" />
 
-      <header className="fixed top-3 left-6 right-6 z-30 flex items-center justify-between text-xs pointer-events-none opacity-80 hover:opacity-100 transition-opacity">
+      {/* Barra superior minimalista */}
+      <header className="relative z-30 w-full px-6 pt-3 flex items-center justify-between text-xs pointer-events-none opacity-85">
         <div className="flex items-center gap-2 pointer-events-auto">
           <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
           <span className="font-mono text-[#d9b77d] tracking-wider text-[11px]">
             FAB LAB PERÚ · PROYECTO REGEN
           </span>
         </div>
-        <div className="hidden md:flex items-center gap-4 text-neutral-400 text-[11px] pointer-events-auto">
-          <span>Espejo Inteligente de Diagnóstico Dérmico</span>
-          <span className="text-[#d9b77d]/60">|</span>
+
+        {/* Mensaje dinámico de escáner */}
+        {scanMessage && (
+          <div className="pointer-events-auto px-3 py-1 rounded-full bg-amber-400/20 border border-amber-300/40 text-amber-200 text-[11px] animate-pulse">
+            ✨ {scanMessage}
+          </div>
+        )}
+
+        <div className="hidden md:flex items-center gap-3 text-neutral-400 text-[11px] pointer-events-auto">
+          <span>Smart Mirror IA</span>
+          <span className="text-[#d9b77d]/60">·</span>
           <span>Bioingredientes Amazónicos</span>
         </div>
       </header>
 
-      <main className="w-full flex justify-center items-center py-6">
+      {/* Contenedor Central: Smart Mirror (auto-escalable y sin scroll) */}
+      <main className="relative flex-1 w-full flex justify-center items-center overflow-hidden py-1">
         <MirrorFrame
           metrics={metrics}
           products={dynamicProducts}
@@ -86,23 +166,32 @@ export function App() {
           onSelectScanPoint={setActiveScanPoint}
           lightTone={lightTone}
           lightBrightness={lightBrightness}
+          macroImage={macroImage}
+          isScanning={isScanning}
+          onMirrorClick={handleMirrorClick}
         />
       </main>
 
-      <ControlsBar
-        useWebcam={useCamera}
-        onToggleWebcam={() => setUseCamera(!useCamera)}
-        selectedSkinType={selectedSkinType}
-        onSelectSkinType={handleSelectSkinType}
-        lightTone={lightTone}
-        onChangeLightTone={setLightTone}
-        lightBrightness={lightBrightness}
-        onChangeBrightness={setLightBrightness}
-        onToggleFullscreen={handleToggleFullscreen}
-        onSelectProbeZone={(pt) => setActiveScanPoint(pt)}
-        currentZone={activeScanPoint.label}
-      />
+      {/* Barra de Controles Inferior */}
+      <footer className="relative z-40 w-full flex justify-center pb-2">
+        <ControlsBar
+          useWebcam={useCamera}
+          onToggleWebcam={() => setUseCamera(!useCamera)}
+          selectedSkinType={selectedSkinType}
+          onSelectSkinType={handleSelectSkinType}
+          lightTone={lightTone}
+          onChangeLightTone={setLightTone}
+          lightBrightness={lightBrightness}
+          onChangeBrightness={setLightBrightness}
+          onToggleFullscreen={handleToggleFullscreen}
+          onSelectProbeZone={(pt) => setActiveScanPoint(pt)}
+          currentZone={activeScanPoint.label}
+          onTriggerScan={performOpticalScan}
+          isScanning={isScanning}
+        />
+      </footer>
 
+      {/* Modal de Dispensación Fab Lab */}
       {dispenserProduct && (
         <FabLabDispenserModal
           product={dispenserProduct}
