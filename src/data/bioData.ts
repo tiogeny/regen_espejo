@@ -1,53 +1,70 @@
-﻿import type { BioProduct, SkinMetrics } from '../types';
+﻿import type { BioProduct, ZoneAnalysis, BodyZone, TankLevel } from '../types';
 
-export const SKIN_PRESETS: Record<string, SkinMetrics> = {
-  mixta: {
-    skinType: 'Mixta',
-    hydration: 40,
-    sebum: 60,
-    ph: 5.5,
-    pores: 52,
-    elasticity: 68,
-    zone: 'Pómulo derecho y mejilla',
+export const ZONE_ANALYSIS_DATA: Record<BodyZone, ZoneAnalysis> = {
+  rostro: {
+    zone: 'rostro',
+    title: 'Piel Facial',
+    subtitle: 'Microscopía y balance dérmico',
+    typeLabel: 'TIPO DE PIEL',
+    typeName: 'Mixta Equilibrada',
+    defaultScanPoint: { x: 46.5, y: 41.5, label: 'Pómulo derecho' },
+    metrics: [
+      { id: 'hidr', label: 'Hidratación', value: 40, displayValue: '40%', color: '#e4c28d', iconType: 'droplet' },
+      { id: 'sebo', label: 'Oleosidad', value: 60, displayValue: '60%', color: '#deb579', iconType: 'wind' },
+      { id: 'ph', label: 'pH Cutáneo', value: 55, displayValue: '5.5', color: '#99c996', iconType: 'sparkles' },
+    ],
   },
-  grasa: {
-    skinType: 'Grasa',
-    hydration: 55,
-    sebum: 82,
-    ph: 6.2,
-    pores: 75,
-    elasticity: 60,
-    zone: 'Zona T y mejillas',
+  cabello: {
+    zone: 'cabello',
+    title: 'Cabello & Cuero Cabelludo',
+    subtitle: 'Porosidad de fibra y salud folicular',
+    typeLabel: 'DIAGNÓSTICO CAPILAR',
+    typeName: 'Fibra Porosa / Raíz Grasa',
+    defaultScanPoint: { x: 50, y: 22, label: 'Raíz y corona capilar' },
+    metrics: [
+      { id: 'porosidad', label: 'Porosidad', value: 72, displayValue: 'Alta', color: '#e4c28d', iconType: 'wind' },
+      { id: 'sebo_raiz', label: 'Oleosidad Raíz', value: 58, displayValue: '58%', color: '#deb579', iconType: 'droplet' },
+      { id: 'queratina', label: 'Brillo / Queratina', value: 46, displayValue: '46%', color: '#99c996', iconType: 'sparkles' },
+    ],
   },
-  seca: {
-    skinType: 'Seca',
-    hydration: 22,
-    sebum: 20,
-    ph: 4.8,
-    pores: 28,
-    elasticity: 45,
-    zone: 'Pómulo y contorno',
+  sonrisa: {
+    zone: 'sonrisa',
+    title: 'Sonrisa & Labios',
+    subtitle: 'Esmalte dental y manto labial',
+    typeLabel: 'BIOMETRÍA ORAL',
+    typeName: 'Esmalte Sensible / Labios Deshidratados',
+    defaultScanPoint: { x: 50, y: 52, label: 'Comisura labial y esmalte' },
+    metrics: [
+      { id: 'esmalte', label: 'Tono Esmalte', value: 65, displayValue: 'A2 (Natural)', color: '#e4c28d', iconType: 'sparkles' },
+      { id: 'labios', label: 'Hidratación Labios', value: 34, displayValue: '34%', color: '#e28888', iconType: 'droplet' },
+      { id: 'microbioma', label: 'Equilibrio Oral', value: 80, displayValue: 'Óptimo', color: '#99c996', iconType: 'shield' },
+    ],
   },
-  sensible: {
-    skinType: 'Sensible',
-    hydration: 35,
-    sebum: 42,
-    ph: 5.0,
-    pores: 38,
-    elasticity: 50,
-    zone: 'Mejillas y cuello',
+  cuerpo: {
+    zone: 'cuerpo',
+    title: 'Manos & Cuerpo',
+    subtitle: 'Elasticidad y barrera lipídica',
+    typeLabel: 'BARRERA CORPORAL',
+    typeName: 'Deshidratación por Estrés',
+    defaultScanPoint: { x: 52, y: 64, label: 'Dorso de mano / cuello' },
+    metrics: [
+      { id: 'elasticidad', label: 'Elasticidad', value: 50, displayValue: '50%', color: '#e4c28d', iconType: 'sparkles' },
+      { id: 'descamacion', label: 'Sequedad Cutánea', value: 68, displayValue: '68%', color: '#deb579', iconType: 'droplet' },
+      { id: 'reparacion', label: 'Tasa Regenerativa', value: 62, displayValue: '62%', color: '#99c996', iconType: 'shield' },
+    ],
   },
 };
 
-export const INITIAL_PRODUCTS: BioProduct[] = [
-  {
+export const ZONE_PRODUCTS: Record<BodyZone, BioProduct> = {
+  rostro: {
     id: 'jabon-facial',
+    zone: 'rostro',
     title: 'TU BIÓPRODUCTO',
-    name: 'Jabón Facial',
+    name: 'Jabón Facial Botánico',
     tagline: 'Equilibra y purifica',
     phTarget: 5.5,
-    category: 'Limpieza Botánica',
-    description: 'Fórmula bioactiva en barra o gel frío diseñada para regular la producción sebácea de la zona T mientras nutre las áreas deshidratadas sin alterar el manto ácido.',
+    category: 'Limpieza Regenerativa',
+    description: 'Fórmula bioactiva para regular la zona T y sellar el manto hidrolipídico con fitonutrientes peruanos.',
     ingredients: [
       {
         id: 'aguaje',
@@ -55,9 +72,9 @@ export const INITIAL_PRODUCTS: BioProduct[] = [
         scientificName: 'Mauritia flexuosa',
         percentage: 40,
         color: '#be4343',
-        benefit: 'Rico en fitoestrógenos y pro-vitamina A. Regeneración celular y elasticidad.',
+        benefit: 'Fitoestrógenos y pro-vitamina A para nutrición y elasticidad.',
         origin: 'Aguajales de Loreto, Amazonía Peruana',
-        activeNutrients: ['Betacaroteno', 'Ácido Oleico', 'Tocoferoles (Vit E)'],
+        activeNutrients: ['Betacaroteno', 'Ácido Oleico', 'Tocoferol'],
       },
       {
         id: 'sacha-inchi',
@@ -65,9 +82,9 @@ export const INITIAL_PRODUCTS: BioProduct[] = [
         scientificName: 'Plukenetia volubilis',
         percentage: 30,
         color: '#658d57',
-        benefit: 'Equilibrio lipídico sin efecto graso. Restaura la barrera epidérmica.',
-        origin: 'San Martín, Selva Alta del Perú',
-        activeNutrients: ['Omega 3 (48%)', 'Omega 6 (36%)', 'Vitamina A'],
+        benefit: 'Omega 3 y 6 que reparan la barrera dérmica sin efecto graso.',
+        origin: 'San Martín, Selva Alta',
+        activeNutrients: ['Omega 3 (48%)', 'Omega 6 (36%)'],
       },
       {
         id: 'camu-camu',
@@ -75,9 +92,9 @@ export const INITIAL_PRODUCTS: BioProduct[] = [
         scientificName: 'Myrciaria dubia',
         percentage: 20,
         color: '#d4a86a',
-        benefit: 'Mayor concentración de Vitamina C del planeta. Antioxidante y luminosidad.',
-        origin: 'Riberas del Río Ucayali, Perú',
-        activeNutrients: ['Vitamina C (30x naranja)', 'Flavonoides', 'Elagitaninos'],
+        benefit: 'Megadosis de vitamina C para iluminar y estimular colágeno.',
+        origin: 'Cuenca del Ucayali, Perú',
+        activeNutrients: ['Vitamina C (30x naranja)', 'Flavonoides'],
       },
       {
         id: 'huito',
@@ -85,142 +102,175 @@ export const INITIAL_PRODUCTS: BioProduct[] = [
         scientificName: 'Genipa americana',
         percentage: 10,
         color: '#8b5a3c',
-        benefit: 'Propiedades astringentes y purificantes suaves. Minimizador de poros.',
-        origin: 'Bosque húmedo tropical, Madre de Dios',
-        activeNutrients: ['Genipina', 'Taninos naturales', 'Bioflavonoides'],
+        benefit: 'Astringente natural suave y minimizador de poros.',
+        origin: 'Madre de Dios, Perú',
+        activeNutrients: ['Genipina', 'Taninos botánicos'],
       },
     ],
   },
-  {
-    id: 'serum-regenerador',
-    title: 'TRATAMIENTO COMPLEMENTARIO',
-    name: 'Sérum Regenerador',
-    tagline: 'Restaura y reafirma',
-    phTarget: 5.2,
-    category: 'Nutrición Profunda',
-    description: 'Suero de absorción rápida enriquecido con resina viva de Sangre de Grado para acelerar la regeneración dérmica y microtextura.',
+  cabello: {
+    id: 'shampoo-solido-ungurahui',
+    zone: 'cabello',
+    title: 'TU BIÓPRODUCTO CAPILAR',
+    name: 'Shampoo Sólido Restaurador',
+    tagline: 'Nutre folículo y sella cutícula',
+    phTarget: 5.0,
+    category: 'Salud Capilar',
+    description: 'Tratamiento botánico libre de sulfatos que fortalece la raíz y repara la hebra dañada por calor o radiación solar.',
     ingredients: [
       {
-        id: 'sangre-grado',
-        name: 'Sangre de Grado',
-        scientificName: 'Croton lechleri',
-        percentage: 35,
-        color: '#9e2a2b',
-        benefit: 'Cicatrizante natural y protector contra estrés oxidativo ambiental.',
-        origin: 'Pucallpa, Selva Central',
-        activeNutrients: ['Taspina', 'Proantocianidinas oligoméricas'],
+        id: 'ungurahui',
+        name: 'Aceite de Ungurahui',
+        scientificName: 'Oenocarpus bataua',
+        percentage: 45,
+        color: '#4e6b41',
+        benefit: 'El "elíxir capilar inca": detiene la caída y da brillo espejo inmediato.',
+        origin: 'Iquitos, Loreto',
+        activeNutrients: ['Ácido oleico (78%)', 'Fitosteroles'],
+      },
+      {
+        id: 'ojon',
+        name: 'Aceite de Ojon / Batana',
+        scientificName: 'Elaeis oleifera',
+        percentage: 25,
+        color: '#b66838',
+        benefit: 'Reconstructor de lípidos en hebras deshidratadas y porosas.',
+        origin: 'Selva Central Peruana',
+        activeNutrients: ['Lípidos de penetración profunda', 'Carotenos'],
+      },
+      {
+        id: 'romero-andino',
+        name: 'Romero Silvestre Andino',
+        scientificName: 'Salvia rosmarinus',
+        percentage: 20,
+        color: '#7ba05b',
+        benefit: 'Estimula microcirculación folicular y previene caspa/grasa.',
+        origin: 'Valle Sagrado, Cusco',
+        activeNutrients: ['Ácido rosmarínico', 'Cineol'],
       },
       {
         id: 'sacha-inchi',
         name: 'Sacha Inchi',
         scientificName: 'Plukenetia volubilis',
-        percentage: 30,
-        color: '#658d57',
-        benefit: 'Hidratación no oclusiva con ácidos grasos esenciales.',
-        origin: 'San Martín, Perú',
-        activeNutrients: ['Omega 3', 'Omega 6'],
+        percentage: 10,
+        color: '#85a468',
+        benefit: 'Sella puntas abiertas y aporta suavidad sin peso graso.',
+        origin: 'Tarapoto, San Martín',
+        activeNutrients: ['Omega 3-6-9'],
+      },
+    ],
+  },
+  sonrisa: {
+    id: 'pasta-dental-chaco',
+    zone: 'sonrisa',
+    title: 'TU BIÓPRODUCTO ORAL',
+    name: 'Pasta Dental Remineralizante',
+    tagline: 'Blanquea y protege sin flúor',
+    phTarget: 7.2,
+    category: 'Higiene & Sonrisa',
+    description: 'Dentífrico botánico a base de arcillas medicinales andinas que absorben toxinas y remineralizan el esmalte.',
+    ingredients: [
+      {
+        id: 'arcilla-chaco',
+        name: 'Arcilla Chaco Medicinal',
+        scientificName: 'Caolín orgánico andino',
+        percentage: 40,
+        color: '#a1937f',
+        benefit: 'Abrasivo ultra suave que remineraliza el esmalte sin dañarlo.',
+        origin: 'Meseta del Collao, Puno',
+        activeNutrients: ['Calcio', 'Magnesio', 'Silicio biodisponible'],
       },
       {
-        id: 'aguaje',
-        name: 'Aguaje',
-        scientificName: 'Mauritia flexuosa',
-        percentage: 25,
-        color: '#be4343',
-        benefit: 'Efecto antioxidante y fotoprotector biológico.',
-        origin: 'Loreto, Perú',
-        activeNutrients: ['Carotenoides', 'Vitamina E'],
+        id: 'cacao-blanco',
+        name: 'Cacao Blanco de Piura',
+        scientificName: 'Theobroma cacao',
+        percentage: 30,
+        color: '#c9a87c',
+        benefit: 'Teobromina natural más eficaz que el flúor para endurecer el esmalte.',
+        origin: 'Bosques secos de Morropón, Piura',
+        activeNutrients: ['Teobromina pura', 'Manteca vegetal protectora'],
+      },
+      {
+        id: 'menta-andina',
+        name: 'Menta Silvestre / Muña',
+        scientificName: 'Minthostachys mollis',
+        percentage: 20,
+        color: '#558252',
+        benefit: 'Poderoso antiséptico bucal andino de aliento fresco prolongado.',
+        origin: 'Serranía de Ayacucho',
+        activeNutrients: ['Pulegona', 'Mentol natural', 'Flavonoides'],
+      },
+      {
+        id: 'sangre-grado',
+        name: 'Sangre de Grado',
+        scientificName: 'Croton lechleri',
+        percentage: 10,
+        color: '#9e2a2b',
+        benefit: 'Cicatrizante natural para encías inflamadas y microcortes.',
+        origin: 'Ucayali, Perú',
+        activeNutrients: ['Taspina alcaloide', 'Proantocianidinas'],
+      },
+    ],
+  },
+  cuerpo: {
+    id: 'manteca-corporal-murumuru',
+    zone: 'cuerpo',
+    title: 'TU BIÓPRODUCTO CORPORAL',
+    name: 'Bálsamo Reparador de Manos',
+    tagline: 'Restaura y nutre en profundidad',
+    phTarget: 5.4,
+    category: 'Nutrición Intensiva',
+    description: 'Concentrado botánico formulado con mantecas nativas para regenerar la piel expuesta a frío, químicos o deshidratación.',
+    ingredients: [
+      {
+        id: 'murumuru',
+        name: 'Manteca de Murumuru',
+        scientificName: 'Astrocaryum murumuru',
+        percentage: 40,
+        color: '#baa67f',
+        benefit: 'Altísimo contenido de ácido láurico que forma una película protectora.',
+        origin: 'Reserva Pacaya Samiria, Loreto',
+        activeNutrients: ['Ácido láurico (47%)', 'Vitamina A'],
       },
       {
         id: 'castana',
         name: 'Castaña Amazónica',
         scientificName: 'Bertholletia excelsa',
-        percentage: 10,
+        percentage: 30,
         color: '#d4a86a',
-        benefit: 'Aporte de Selenio biodisponible y suavidad sedosa.',
+        benefit: 'Aporte de Selenio antioxidante para rejuvenecimiento de manos.',
         origin: 'Madre de Dios, Perú',
-        activeNutrients: ['Selenio orgánico', 'Fitoesteroles'],
-      },
-    ],
-  },
-  {
-    id: 'bruma-tonificante',
-    title: 'EQUILIBRIO DIARIO',
-    name: 'Bruma Tonificante',
-    tagline: 'Refresca e hidrata',
-    phTarget: 5.6,
-    category: 'Equilibrio de pH',
-    description: 'Hidrolato botánico enriquecido con copaiba y camu camu para sellar la hidratación y calmar la inflamación reactiva.',
-    ingredients: [
-      {
-        id: 'camu-camu',
-        name: 'Camu Camu',
-        scientificName: 'Myrciaria dubia',
-        percentage: 45,
-        color: '#d4a86a',
-        benefit: 'Bio-shot de vitamina C que ilumina el cutis cansado.',
-        origin: 'Ucayali, Perú',
-        activeNutrients: ['Ácido ascórbico natural', 'Polifenoles'],
+        activeNutrients: ['Selenio orgánico', 'Ácido linoleico'],
       },
       {
-        id: 'copaiba',
-        name: 'Bálsamo de Copaiba',
-        scientificName: 'Copaifera officinalis',
-        percentage: 25,
-        color: '#4d7c58',
-        benefit: 'Poderoso antiinflamatorio y equilibrador del microbioma.',
-        origin: 'Cuenca del Marañón, Loreto',
-        activeNutrients: ['Beta-cariofileno', 'Diterpenos'],
+        id: 'sangre-grado',
+        name: 'Sangre de Grado',
+        scientificName: 'Croton lechleri',
+        percentage: 20,
+        color: '#9e2a2b',
+        benefit: 'Acelera la curación de grietas dérmicas y sequedad extrema.',
+        origin: 'Selva Central, Perú',
+        activeNutrients: ['Taspina cicatrizante'],
       },
       {
         id: 'aguaje',
         name: 'Aguaje',
         scientificName: 'Mauritia flexuosa',
-        percentage: 20,
+        percentage: 10,
         color: '#be4343',
-        benefit: 'Manto lipídico protector ligero.',
+        benefit: 'Protección fotocelular y elasticidad cutánea.',
         origin: 'Loreto, Perú',
         activeNutrients: ['Betacaroteno'],
       },
-      {
-        id: 'huito',
-        name: 'Huito',
-        scientificName: 'Genipa americana',
-        percentage: 10,
-        color: '#8b5a3c',
-        benefit: 'Regulación sutil de poros y tono cutáneo.',
-        origin: 'Madre de Dios, Perú',
-        activeNutrients: ['Genipósido', 'Iridoides'],
-      },
     ],
   },
+};
+
+export const FAB_LAB_TANKS: TankLevel[] = [
+  { id: 'aguaje', name: 'Aguaje', origin: 'Loreto', level: 86, color: '#be4343' },
+  { id: 'sacha', name: 'Sacha Inchi', origin: 'San Martín', level: 92, color: '#658d57' },
+  { id: 'camu', name: 'Camu Camu', origin: 'Ucayali', level: 74, color: '#d4a86a' },
+  { id: 'ungurahui', name: 'Ungurahui', origin: 'Iquitos', level: 80, color: '#4e6b41' },
+  { id: 'chaco', name: 'Arcilla Chaco', origin: 'Puno', level: 95, color: '#a1937f' },
+  { id: 'sangre', name: 'Sangre de Grado', origin: 'Selva Central', level: 68, color: '#9e2a2b' },
 ];
-
-export function calculateDynamicFormula(metrics: SkinMetrics): BioProduct {
-  const base = JSON.parse(JSON.stringify(INITIAL_PRODUCTS[0])) as BioProduct;
-
-  let aguajePct = 40;
-  let sachaPct = 30;
-  let camuPct = 20;
-  let huitoPct = 10;
-
-  if (metrics.sebum > 65) {
-    sachaPct += 10;
-    huitoPct += 5;
-    aguajePct -= 10;
-    camuPct -= 5;
-  } else if (metrics.hydration < 35) {
-    aguajePct += 10;
-    camuPct += 5;
-    huitoPct -= 5;
-    sachaPct -= 10;
-  }
-
-  const total = aguajePct + sachaPct + camuPct + huitoPct;
-  base.ingredients[0].percentage = Math.round((aguajePct / total) * 100);
-  base.ingredients[1].percentage = Math.round((sachaPct / total) * 100);
-  base.ingredients[2].percentage = Math.round((camuPct / total) * 100);
-  base.ingredients[3].percentage = 100 - (base.ingredients[0].percentage + base.ingredients[1].percentage + base.ingredients[2].percentage);
-
-  base.phTarget = metrics.ph;
-  return base;
-}

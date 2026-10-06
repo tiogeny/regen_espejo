@@ -1,17 +1,9 @@
 ﻿import React from 'react';
 import { HeaderBrand } from './HeaderBrand';
 import { FaceTargetOverlay } from './FaceTargetOverlay';
-import { SkinMetricsCard } from './SkinMetricsCard';
-import { BioproductCard } from './BioproductCard';
-import type { SkinMetrics, BioProduct, ScanPoint } from '../types';
+import type { ScanPoint } from '../types';
 
 interface MirrorFrameProps {
-  metrics: SkinMetrics;
-  products: BioProduct[];
-  currentProductIndex: number;
-  onSelectProduct: (index: number) => void;
-  onOpenDispenser: (product: BioProduct) => void;
-  onUpdateMetric: (key: keyof SkinMetrics, value: number) => void;
   videoRef: React.RefObject<HTMLVideoElement | null>;
   useWebcam: boolean;
   activeScanPoint: ScanPoint;
@@ -24,12 +16,6 @@ interface MirrorFrameProps {
 }
 
 export const MirrorFrame: React.FC<MirrorFrameProps> = ({
-  metrics,
-  products,
-  currentProductIndex,
-  onSelectProduct,
-  onOpenDispenser,
-  onUpdateMetric,
   videoRef,
   useWebcam,
   activeScanPoint,
@@ -44,12 +30,12 @@ export const MirrorFrame: React.FC<MirrorFrameProps> = ({
     if (lightTone === 'off') return 'border-neutral-700 shadow-none';
     const alpha = (lightBrightness / 100).toFixed(2);
     if (lightTone === 'warm') {
-      return `border-[#f5dfb8] shadow-[0_0_${Math.round(lightBrightness * 0.7)}px_rgba(245,215,150,${alpha}),inset_0_0_${Math.round(lightBrightness * 0.25)}px_rgba(255,230,180,0.35)]`;
+      return `border-[#f5dfb8] shadow-[0_0_${Math.round(lightBrightness * 0.75)}px_rgba(245,215,150,${alpha}),inset_0_0_${Math.round(lightBrightness * 0.25)}px_rgba(255,230,180,0.35)]`;
     }
     if (lightTone === 'cool') {
-      return `border-[#e3f0fc] shadow-[0_0_${Math.round(lightBrightness * 0.7)}px_rgba(200,230,255,${alpha}),inset_0_0_${Math.round(lightBrightness * 0.25)}px_rgba(220,240,255,0.35)]`;
+      return `border-[#e3f0fc] shadow-[0_0_${Math.round(lightBrightness * 0.75)}px_rgba(200,230,255,${alpha}),inset_0_0_${Math.round(lightBrightness * 0.25)}px_rgba(220,240,255,0.35)]`;
     }
-    return `border-[#fffaee] shadow-[0_0_${Math.round(lightBrightness * 0.7)}px_rgba(255,250,230,${alpha}),inset_0_0_${Math.round(lightBrightness * 0.25)}px_rgba(255,250,240,0.35)]`;
+    return `border-[#fffaee] shadow-[0_0_${Math.round(lightBrightness * 0.75)}px_rgba(255,250,230,${alpha}),inset_0_0_${Math.round(lightBrightness * 0.25)}px_rgba(255,250,240,0.35)]`;
   };
 
   const handleContainerClick = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -57,20 +43,19 @@ export const MirrorFrame: React.FC<MirrorFrameProps> = ({
     const rect = e.currentTarget.getBoundingClientRect();
     const x = ((e.clientX - rect.left) / rect.width) * 100;
     const y = ((e.clientY - rect.top) / rect.height) * 100;
-    // Evitar clics extremos fuera del radio facial
-    if (x >= 20 && x <= 80 && y >= 20 && y <= 80) {
+    if (x >= 15 && x <= 85 && y >= 15 && y <= 85) {
       onMirrorClick(Math.round(x * 10) / 10, Math.round(y * 10) / 10);
     }
   };
 
   return (
-    <div className="relative flex flex-col items-center justify-center select-none">
-      {/* Contenedor circular con escala dinámica basada en viewport height */}
-      <div className="relative w-[min(74vh,580px)] h-[min(74vh,580px)] aspect-square rounded-full p-2.5 flex items-center justify-center">
-        {/* Bisel metálico exterior */}
-        <div className="absolute inset-0 rounded-full border-[8px] border-[#383126] shadow-[0_15px_40px_rgba(0,0,0,0.85),inset_0_2px_4px_rgba(255,255,255,0.15)] bg-gradient-to-br from-[#2a241b] via-[#1c1813] to-[#3b3223]" />
+    <div className="relative flex flex-col items-center justify-center select-none flex-shrink-0">
+      {/* Contenedor circular con escala armónica */}
+      <div className="relative w-[min(76vh,540px)] h-[min(76vh,540px)] aspect-square rounded-full p-2.5 flex items-center justify-center">
+        {/* Bisel exterior de metal satinado */}
+        <div className="absolute inset-0 rounded-full border-[8px] border-[#383126] shadow-[0_20px_50px_rgba(0,0,0,0.85),inset_0_2px_4px_rgba(255,255,255,0.15)] bg-gradient-to-br from-[#2a241b] via-[#1c1813] to-[#3b3223]" />
 
-        {/* Aro perimetral de iluminación LED */}
+        {/* Halo de luz LED perimetral */}
         <div
           className={`absolute inset-1.5 rounded-full border-[4px] transition-all duration-700 ${getGlowStyles()}`}
         />
@@ -80,7 +65,7 @@ export const MirrorFrame: React.FC<MirrorFrameProps> = ({
           onClick={handleContainerClick}
           className="relative w-full h-full rounded-full overflow-hidden bg-neutral-950 flex items-center justify-center border border-white/10 shadow-inner cursor-crosshair"
         >
-          {/* Transmisión de la cámara web (invertida en espejo) */}
+          {/* Cámara web en vivo (espejo invertido) */}
           {useWebcam ? (
             <video
               ref={videoRef}
@@ -103,7 +88,7 @@ export const MirrorFrame: React.FC<MirrorFrameProps> = ({
           {/* Viñeta circular suave */}
           <div className="absolute inset-0 rounded-full bg-[radial-gradient(circle_at_center,transparent_45%,rgba(0,0,0,0.65)_95%)] pointer-events-none" />
 
-          {/* Retícula de escaneo interactiva */}
+          {/* Retícula de escaneo interactiva en la zona corporal */}
           <FaceTargetOverlay
             activePoint={activeScanPoint}
             onSelectPoint={onSelectScanPoint}
@@ -111,36 +96,15 @@ export const MirrorFrame: React.FC<MirrorFrameProps> = ({
             macroImage={macroImage}
           />
 
-          {/* Capa HUD holográfica */}
-          <div className="absolute inset-0 p-5 flex flex-col justify-between pointer-events-none">
-            {/* Header: REGEN */}
-            <div className="w-full flex justify-center">
-              <HeaderBrand />
-            </div>
-
-            {/* Panel de métricas (arriba a la derecha) */}
-            <div className="flex justify-end pr-2 pointer-events-auto">
-              <SkinMetricsCard
-                metrics={metrics}
-                onUpdateMetric={onUpdateMetric}
-              />
-            </div>
-
-            {/* Panel Bioproducto (abajo a la derecha) */}
-            <div className="flex justify-end pr-1 pb-1 pointer-events-auto">
-              <BioproductCard
-                products={products}
-                currentIndex={currentProductIndex}
-                onSelectProduct={onSelectProduct}
-                onOpenDispenser={onOpenDispenser}
-              />
-            </div>
+          {/* HUD superior limpio: logotipo REGEN */}
+          <div className="absolute inset-0 p-5 flex flex-col justify-start items-center pointer-events-none">
+            <HeaderBrand />
           </div>
         </div>
       </div>
 
-      {/* Soporte vertical decorativo minimalista */}
-      <div className="w-4 h-6 bg-gradient-to-b from-[#2a241b] to-[#1a1612] border-x border-[#524430] shadow-md -mt-0.5" />
+      {/* Soporte de tocador */}
+      <div className="w-4 h-5 bg-gradient-to-b from-[#2a241b] to-[#1a1612] border-x border-[#524430] shadow-md -mt-0.5" />
       <div className="w-24 h-2 rounded-full bg-gradient-to-r from-[#201b14] via-[#3d3324] to-[#201b14] border border-[#524430] shadow-lg" />
     </div>
   );
