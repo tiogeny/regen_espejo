@@ -1,5 +1,9 @@
 // REGEN · Espejo Inteligente de Diagnóstico Dermatoscópico (Client-Side Web)
-import { FilesetResolver, FaceLandmarker, HandLandmarker } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.js";
+
+// Redirigir automáticamente a HTTPS si se entra por HTTP (la webcam solo funciona en HTTPS)
+if (location.protocol === 'http:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+  location.replace(location.href.replace('http:', 'https:'));
+}
 
 const $ = id => document.getElementById(id);
 const cameraCanvas = $('camera'), ctx = cameraCanvas.getContext('2d');
@@ -74,10 +78,24 @@ const BOTANICAL_CATALOG = {
   ]
 };
 
-// 1. Inicialización de la Cámara Web
+// 1. Inicialización Inmediata de la Cámara Web
 async function initCamera() {
   const statusEl = $('connection-status');
   statusEl.textContent = 'Solicitando cámara…';
+
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    statusEl.textContent = 'Requiere HTTPS';
+    $('camera-message').innerHTML = `
+      <div style="padding:16px;">
+        <p style="color:#dfc185;margin:0 0 10px;">⚠️ La cámara web requiere conexión segura (HTTPS).</p>
+        <a href="https://${location.host}${location.pathname}" style="display:inline-block;background:#dfc185;color:#20291b;font-weight:600;padding:10px 20px;border-radius:10px;text-decoration:none;">
+          Entrar con HTTPS seguro
+        </a>
+      </div>
+    `;
+    return;
+  }
+
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
       video: {
@@ -94,15 +112,26 @@ async function initCamera() {
     statusEl.dataset.connected = 'true';
     requestAnimationFrame(renderLoop);
   } catch (err) {
-    statusEl.textContent = 'Error de cámara';
-    $('camera-message').textContent = 'Permite el acceso a la cámara en tu navegador para iniciar el espejo.';
-    console.error('Error accediendo a la webcam:', err);
+    statusEl.textContent = 'Permiso pendiente';
+    $('camera-message').innerHTML = `
+      <div style="padding:16px;">
+        <p style="color:#fff3d8;margin:0 0 12px;font-size:15px;">Haz clic aquí para conceder permiso a la cámara:</p>
+        <button id="btn-allow-cam" style="background:#dfc185;color:#20291b;font-weight:600;padding:12px 24px;border-radius:12px;border:none;cursor:pointer;font-size:16px;">
+          📸 Conectar Cámara Web
+        </button>
+      </div>
+    `;
+    $('btn-allow-cam')?.addEventListener('click', initCamera);
+    console.warn('Esperando permiso de usuario para cámara:', err);
   }
 }
 
-// 2. Inicialización de Modelos MediaPipe (Face & Hand)
+// 2. Inicialización Asíncrona de Modelos MediaPipe (sin bloquear la cámara)
 async function initMediaPipe() {
   try {
+    const visionModule = await import("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.js");
+    const { FilesetResolver, FaceLandmarker, HandLandmarker } = visionModule;
+
     const vision = await FilesetResolver.forVisionTasks(
       "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
     );
@@ -126,7 +155,6 @@ async function initMediaPipe() {
         numHands: 1
       });
     } catch (e) {
-      console.warn("Hand landmarker cargando con CPU fallback...", e);
       handLandmarker = await HandLandmarker.createFromOptions(vision, {
         baseOptions: {
           modelAssetPath: "./models/hand_landmarker.task",
@@ -138,10 +166,9 @@ async function initMediaPipe() {
     }
 
     isModelReady = true;
-    console.log("MediaPipe Face & Hand Landmarkers listos.");
+    console.log("MediaPipe Face & Hand Landmarker activos.");
   } catch (err) {
-    console.warn("Error cargando MediaPipe local, usando fallback táctil:", err);
-    // El sistema permite selección táctil/clic en pantalla si los modelos tardan en cargar
+    console.warn("MediaPipe no disponible, operando en modo táctil directo:", err);
   }
 }
 
@@ -253,26 +280,21 @@ function processTracking(timestamp) {
   const handLandmarks = handResult?.landmarks?.[0] || null;
 
   if (handLandmarks) {
-    // Punta del índice (Landmark 8) y nudillo (Landmark 5)
     const tip = handLandmarks[8];
     const pip = handLandmarks[6];
     const mcp = handLandmarks[5];
 
-    // Verificar que el dedo esté extendido
     const distTipMcp = Math.hypot(tip.x - mcp.x, tip.y - mcp.y);
     const distPipMcp = Math.hypot(pip.x - mcp.x, pip.y - mcp.y);
     const isExtended = distTipMcp > distPipMcp * 1.15;
 
     if (isExtended) {
-      // Coordenadas en píxeles del video original
       const tipVidX = tip.x * vw;
       const tipVidY = tip.y * vh;
 
-      // Transformar al canvas reflejado
       const mirrorX = cw - ((tipVidX - sx) / side * cw);
       const mirrorY = ((tipVidY - sy) / side) * ch;
 
-      // Comprobar si apunta dentro de la zona de piel del rostro
       const faceBounding = getFaceBounds(currentFaceLandmarks, vw, vh, sx, sy, side, cw, ch);
       if (isPointInsideFace(mirrorX, mirrorY, faceBounding)) {
         handleFingerPointing(mirrorX, mirrorY);
@@ -281,13 +303,10 @@ function processTracking(timestamp) {
     }
   }
 
-  // Si no hay dedo señalando, verificar si completó fijación para disparar análisis
   if (state === 'FIJANDO_ZONA') {
     if (targetZone && targetZone.progress >= 0.85) {
-      // Retiró la mano tras fijar la zona -> ¡Disparar análisis clínico!
       triggerClinicalAnalysis(targetZone);
     } else {
-      // Retiró antes de tiempo -> reiniciar búsqueda
       state = 'BUSCANDO';
       targetZone = null;
       $('instruction').textContent = 'Señala una zona de tu rostro con el índice.';
@@ -296,7 +315,6 @@ function processTracking(timestamp) {
   }
 }
 
-// Bounding box y soporte anatómico del rostro
 function getFaceBounds(landmarks, vw, vh, sx, sy, side, cw, ch) {
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
   for (const lm of landmarks) {
@@ -316,7 +334,6 @@ function isPointInsideFace(px, py, b) {
          py >= b.minY + marginY && py <= b.maxY - marginY;
 }
 
-// Maneja la fijación gradual de la zona señalada
 function handleFingerPointing(x, y) {
   const now = performance.now();
   const radius = 28;
@@ -326,11 +343,10 @@ function handleFingerPointing(x, y) {
     targetZone = { x, y, radius, startTs: now, progress: 0 };
     $('instruction').textContent = 'Mantén tu dedo para fijar la zona…';
   } else {
-    // Suavizado del punto si el dedo o cabeza se mueven un poco
     targetZone.x = targetZone.x * 0.8 + x * 0.2;
     targetZone.y = targetZone.y * 0.8 + y * 0.2;
     const elapsed = now - targetZone.startTs;
-    targetZone.progress = Math.min(1.0, elapsed / 1200); // 1.2 segundos para fijar
+    targetZone.progress = Math.min(1.0, elapsed / 1200);
     $('scan-progress').value = targetZone.progress;
 
     if (targetZone.progress >= 1.0) {
@@ -339,14 +355,13 @@ function handleFingerPointing(x, y) {
   }
 }
 
-// 5. Análisis Clínico On-Device (Cero tokens, 100% en el navegador)
+// 5. Análisis Clínico On-Device
 function triggerClinicalAnalysis(zone) {
   state = 'ANALIZANDO';
   $('instruction').textContent = 'Analizando tu zona cutánea…';
   $('scan-progress').value = 1;
   document.querySelector('.camera-stage').dataset.state = 'ANALIZANDO';
 
-  // Esperar un fotograma limpio para extraer el recorte
   setTimeout(() => {
     performDermatologicalCalculations(zone);
   }, 150);
@@ -359,7 +374,6 @@ function performDermatologicalCalculations(zone) {
   tempCanvas.height = cropSize;
   const tCtx = tempCanvas.getContext('2d');
 
-  // Recortar la zona alrededor de (zone.x, zone.y)
   const sourceRadius = zone.radius * 2.2;
   const sx = Math.max(0, Math.min(cameraCanvas.width - sourceRadius, zone.x - sourceRadius / 2));
   const sy = Math.max(0, Math.min(cameraCanvas.height - sourceRadius, zone.y - sourceRadius / 2));
@@ -368,32 +382,23 @@ function performDermatologicalCalculations(zone) {
   const imgData = tCtx.getImageData(0, 0, cropSize, cropSize);
   const data = imgData.data;
 
-  // 1. Cálculos de Luminancia y Color CIELAB / ITA (Ángulo Tipológico Individual)
-  let totalL = 0, totalA = 0, totalB = 0;
-  let totalR = 0, totalG = 0, totalB_rgb = 0;
+  let totalL = 0, totalB = 0;
   let spotPixels = 0;
   const totalPixels = cropSize * cropSize;
 
   for (let i = 0; i < data.length; i += 4) {
     const r = data[i], g = data[i + 1], b = data[i + 2];
-    totalR += r; totalG += g; totalB_rgb += b;
-
-    // Conversión a espacio CIELAB estándar
     const lab = rgb2lab(r, g, b);
     totalL += lab.L;
     totalB += lab.b;
 
-    // Detección de contraste de melanina / hiperpigmentación
-    // Pigmentación: menor luminancia y mayor componente b* (melanina basal)
     if (lab.L < 48 && (lab.b > 16 || (r - b > 35 && g - b > 15))) {
       spotPixels++;
-      // Resaltar en dorado sobre el recorte ampliado (estilo Ronal)
       data[i] = Math.min(255, data[i] + 45);
       data[i + 1] = Math.min(255, data[i + 1] + 30);
     }
   }
 
-  // Actualizar imagen con máscara dorada en el visor de microscopía
   tCtx.putImageData(imgData, 0, 0);
   zoom.clearRect(0, 0, 224, 224);
   zoom.drawImage(tempCanvas, 0, 0);
@@ -403,15 +408,12 @@ function performDermatologicalCalculations(zone) {
   const avgL = totalL / totalPixels;
   const avgB = Math.max(0.1, totalB / totalPixels);
 
-  // Cálculo canónico del ángulo ITA de Fitzpatrick: arctan((L* - 50) / b*) * (180 / π)
   const itaDeg = Math.atan((avgL - 50.0) / avgB) * (180 / Math.PI);
   const fitzpatrickPhototype = getFitzpatrickPhototype(itaDeg);
 
-  // 2. Porcentaje de área segmentada
   const spotPercentage = Number(((spotPixels / totalPixels) * 100).toFixed(2));
   const globalSpotPct = Number(Math.max(0.5, (spotPercentage * 0.72)).toFixed(2));
 
-  // 3. Estimación de Edad Biológica Cutánea (Escala 18-90 calibrada con microtextura)
   let varianceSum = 0;
   for (let i = 0; i < data.length; i += 4) {
     const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
@@ -420,12 +422,10 @@ function performDermatologicalCalculations(zone) {
   const textureVariance = Math.sqrt(varianceSum / totalPixels);
   const estimatedAge = Math.round(Math.min(85, Math.max(19, 23 + textureVariance * 1.45 + (100 - avgL) * 0.2)));
 
-  // 4. Indicadores de Apariencia Visual (Brillo, Textura, Señales de Sequedad)
   const shineVal = Math.min(95, Math.max(5, Math.round(avgL > 60 ? (avgL - 50) * 1.8 : 12)));
   const textureVal = Math.min(95, Math.max(8, Math.round(textureVariance * 2.1)));
   const drynessVal = Math.min(90, Math.max(4, Math.round(Math.max(0, 45 - shineVal * 0.4 + textureVal * 0.3))));
 
-  // Guardar diagnóstico activo
   diagnosticData = {
     clinical: {
       zona_seleccionada: true,
@@ -454,7 +454,6 @@ function performDermatologicalCalculations(zone) {
   renderDiagnosticUI();
 }
 
-// 6. Conversión de Color a CIELAB
 function rgb2lab(r, g, b) {
   let rL = r / 255, gL = g / 255, bL = b / 255;
   rL = rL > 0.04045 ? Math.pow((rL + 0.055) / 1.055, 2.4) : rL / 12.92;
@@ -485,16 +484,13 @@ function getFitzpatrickPhototype(ita) {
   return 6;
 }
 
-// 7. Renderizado de la Interfaz con los Datos Clínicos
 function renderDiagnosticUI() {
   if (!diagnosticData) return;
   const c = diagnosticData.clinical;
   const v = diagnosticData.visual_appearance;
 
-  // Tarjeta de piel
   $('skin-type').textContent = c.fototipo_label || 'Zona evaluada';
 
-  // Métricas según modo seleccionado (Cámara vs Análisis visual)
   if (mode === 'visual') {
     $('metric-label-1').textContent = 'Área segmentada';
     $('metric-value-1').textContent = measurement(c.porcentaje_hiperpigmentacion_zona, ' %');
@@ -523,7 +519,6 @@ function renderDiagnosticUI() {
     $('measurement-note').textContent = 'Cobertura visual experimental de la zona seleccionada.';
   }
 
-  // Gráfico Donut de área
   const pct = c.porcentaje_hiperpigmentacion_zona;
   const circ = 2 * Math.PI * 48;
   const used = (pct / 100) * circ;
@@ -542,7 +537,6 @@ function renderDiagnosticUI() {
   $('formula-note').textContent = 'Área marcada por el modelo en la zona señalada';
   document.querySelector('.product').dataset.ready = 'true';
 
-  // Detalle modal
   $('spots').textContent = measurement(pct, ' %');
   $('global-spots').textContent = measurement(c.porcentaje_hiperpigmentacion, ' %');
   $('age').textContent = measurement(c.edad_biologica_estimada, ' años');
@@ -552,9 +546,7 @@ function renderDiagnosticUI() {
   $('dryness-detail').textContent = measurement(v.dryness_cues, ' %');
 }
 
-// 8. Event Listeners y Controles de la Interfaz
 function setupEventListeners() {
-  // Cambio de pestañas Cámara vs Análisis visual
   $('visual-mode').addEventListener('click', () => {
     mode = 'visual';
     $('visual-mode').setAttribute('aria-pressed', 'true');
@@ -569,7 +561,6 @@ function setupEventListeners() {
     renderDiagnosticUI();
   });
 
-  // Selección directa por clic/táctil en el espejo (fallback accesible)
   cameraCanvas.addEventListener('pointerdown', (e) => {
     if (state === 'ANALIZANDO') return;
     const rect = cameraCanvas.getBoundingClientRect();
@@ -579,7 +570,6 @@ function setupEventListeners() {
     triggerClinicalAnalysis(targetZone);
   });
 
-  // Botón Repetir zona
   $('restart').addEventListener('click', () => {
     state = 'BUSCANDO';
     targetZone = null;
@@ -596,7 +586,6 @@ function setupEventListeners() {
     document.querySelector('.camera-stage').dataset.state = 'BUSCANDO';
   });
 
-  // Botón Nueva persona
   $('new-person').addEventListener('click', () => {
     $('new-person-confirm').showModal();
   });
@@ -607,7 +596,6 @@ function setupEventListeners() {
     }
   });
 
-  // Modal de detalles
   $('expand-result').addEventListener('click', () => {
     $('detail').hidden = false;
     $('reading-detail').hidden = false;
@@ -630,7 +618,6 @@ function setupEventListeners() {
     $('detail').hidden = true;
   });
 
-  // Cuestionario de Recomendaciones
   $('open-questionnaire').addEventListener('click', () => {
     $('questionnaire-dialog').showModal();
   });
@@ -643,7 +630,6 @@ function setupEventListeners() {
     $('questionnaire-dialog').close();
   });
 
-  // Poblar edades en el cuestionario
   const ageSelect = document.querySelector('select[name="age"]');
   if (ageSelect) {
     for (let a = 18; a <= 85; a++) {
@@ -654,20 +640,16 @@ function setupEventListeners() {
     }
   }
 
-  // Envío del cuestionario y evaluación de reglas fitoterapéuticas
   $('questionnaire-form').addEventListener('submit', (e) => {
     e.preventDefault();
     const formData = new FormData(e.target);
     const declaredAge = parseInt(formData.get('age')) || diagnosticData?.clinical?.edad_biologica_estimada || 30;
     const sensitive = formData.get('sensitive_skin') === 'true';
     const salicylateAllergy = formData.get('salicylate_allergy') === 'true';
-    const pregnancy = formData.get('pregnancy_lactating') === 'true';
 
-    // Determinar grupo etario
     const group = declaredAge < 25 ? 'JOVEN' : declaredAge < 40 ? 'ADULTO' : 'MADURO';
     let prescriptions = [...BOTANICAL_CATALOG[group]];
 
-    // Filtros de contraindicación médica
     if (sensitive || salicylateAllergy) {
       prescriptions = prescriptions.filter(p => !p.especie.toLowerCase().includes('salix'));
     }
@@ -714,9 +696,15 @@ function renderRecommendations(items, age, group) {
   }
 }
 
-// Inicio al cargar la página
-window.addEventListener('DOMContentLoaded', () => {
+// Arranque seguro sin perder el evento DOMContentLoaded
+function boot() {
   setupEventListeners();
   initCamera();
   initMediaPipe();
-});
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', boot);
+} else {
+  boot();
+}
