@@ -19,11 +19,12 @@ const phototypeRoman = ['', 'I', 'II', 'III', 'IV', 'V', 'VI'];
 let state = 'BUSCANDO'; // 'BUSCANDO' | 'FIJANDO_ZONA' | 'ANALIZANDO' | 'DIAGNOSTICADO'
 let mode = 'visual'; // 'visual' | 'appearance'
 let targetZone = null; // { x, y, radius, startTs, progress }
+let lastFingertip = null; // { x, y, ts }
 let diagnosticData = null;
 let faceLandmarker = null;
 let handLandmarker = null;
 let isModelReady = false;
-let lastVideoTime = -1;
+let lastTimestamp = 0;
 let currentFaceLandmarks = null;
 
 // Catálogo farmacognóstico determinista de Ronal
@@ -126,8 +127,9 @@ async function initCamera() {
   }
 }
 
-// 2. Inicialización Asíncrona de Modelos MediaPipe (sin bloquear la cámara)
+// 2. Inicialización Asíncrona de Modelos MediaPipe (Face & Hand)
 async function initMediaPipe() {
+  $('instruction').textContent = 'Iniciando inteligencia artificial (un momento)…';
   try {
     const visionModule = await import("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.js");
     const { FilesetResolver, FaceLandmarker, HandLandmarker } = visionModule;
@@ -166,9 +168,11 @@ async function initMediaPipe() {
     }
 
     isModelReady = true;
+    $('instruction').textContent = '✨ ¡Listo! Señala una zona de tu rostro con el índice o haz clic.';
     console.log("MediaPipe Face & Hand Landmarker activos.");
   } catch (err) {
-    console.warn("MediaPipe no disponible, operando en modo táctil directo:", err);
+    console.warn("MediaPipe fallback táctil:", err);
+    $('instruction').textContent = 'Toca cualquier zona de tu rostro en la pantalla para analizar.';
   }
 }
 
@@ -176,9 +180,16 @@ async function initMediaPipe() {
 function renderLoop() {
   if (video.readyState >= 2) {
     drawMirrorFrame();
-    if (isModelReady && video.currentTime !== lastVideoTime) {
-      lastVideoTime = video.currentTime;
-      processTracking(video.currentTime * 1000);
+
+    const now = performance.now();
+    // Procesar visión artificial a 25-30 FPS con timestamp monótono
+    if (isModelReady && now - lastTimestamp >= 35) {
+      lastTimestamp = now;
+      try {
+        processTracking(Math.round(now));
+      } catch (err) {
+        console.warn("Error en tracking frame:", err);
+      }
     }
   }
   requestAnimationFrame(renderLoop);
@@ -199,6 +210,21 @@ function drawMirrorFrame() {
   ctx.scale(-1, 1);
   ctx.drawImage(video, sx, sy, side, side, 0, 0, cw, ch);
   ctx.restore();
+
+  // Partícula que sigue el dedo índice si está en pantalla
+  if (lastFingertip && (state === 'BUSCANDO' || state === 'FIJANDO_ZONA')) {
+    const age = performance.now() - lastFingertip.ts;
+    if (age < 200) {
+      ctx.save();
+      ctx.fillStyle = '#dfc185';
+      ctx.shadowColor = '#ffe4a6';
+      ctx.shadowBlur = 12;
+      ctx.beginPath();
+      ctx.arc(lastFingertip.x, lastFingertip.y, 7, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
 
   // Si hay una zona seleccionada o en proceso de fijado, dibujar los círculos dorados
   if (targetZone && (state === 'FIJANDO_ZONA' || state === 'DIAGNOSTICADO')) {
@@ -226,7 +252,7 @@ function drawZoneHighlight(zone) {
   // Arco de progreso si se está fijando la zona
   if (state === 'FIJANDO_ZONA' && progress > 0) {
     ctx.strokeStyle = '#dfc185';
-    ctx.lineWidth = 3;
+    ctx.lineWidth = 3.5;
     ctx.beginPath();
     ctx.arc(x, y, radius * 1.55, -Math.PI / 2, -Math.PI / 2 + 2 * Math.PI * progress);
     ctx.stroke();
@@ -254,7 +280,7 @@ function drawZoneHighlight(zone) {
   ctx.restore();
 }
 
-// 4. Detección de Rostro y Señalamiento con el Dedo Índice
+// 4. Detección de Rostro y Señalamiento con el Dedo
 function processTracking(timestamp) {
   if (state === 'ANALIZANDO') return;
 
@@ -279,59 +305,57 @@ function processTracking(timestamp) {
   const handResult = handLandmarker?.detectForVideo(video, timestamp);
   const handLandmarks = handResult?.landmarks?.[0] || null;
 
+  let fingerOnFace = false;
+
   if (handLandmarks) {
+    // Punta del índice (Landmark 8)
     const tip = handLandmarks[8];
-    const pip = handLandmarks[6];
-    const mcp = handLandmarks[5];
+    const tipVidX = tip.x * vw;
+    const tipVidY = tip.y * vh;
 
-    const distTipMcp = Math.hypot(tip.x - mcp.x, tip.y - mcp.y);
-    const distPipMcp = Math.hypot(pip.x - mcp.x, pip.y - mcp.y);
-    const isExtended = distTipMcp > distPipMcp * 1.15;
+    // Coordenadas en el canvas reflejado
+    const mirrorX = cw - ((tipVidX - sx) / side * cw);
+    const mirrorY = ((tipVidY - sy) / side) * ch;
 
-    if (isExtended) {
-      const tipVidX = tip.x * vw;
-      const tipVidY = tip.y * vh;
+    lastFingertip = { x: mirrorX, y: mirrorY, ts: performance.now() };
 
-      const mirrorX = cw - ((tipVidX - sx) / side * cw);
-      const mirrorY = ((tipVidY - sy) / side) * ch;
+    // Verificar cercanía a la piel del rostro
+    // Buscamos si el dedo está a menos de 45px de algún punto facial
+    let closestDist = Infinity;
+    let closestFacePt = null;
 
-      const faceBounding = getFaceBounds(currentFaceLandmarks, vw, vh, sx, sy, side, cw, ch);
-      if (isPointInsideFace(mirrorX, mirrorY, faceBounding)) {
-        handleFingerPointing(mirrorX, mirrorY);
-        return;
+    for (let i = 0; i < currentFaceLandmarks.length; i += 4) {
+      const lm = currentFaceLandmarks[i];
+      const flmX = cw - ((lm.x * vw - sx) / side * cw);
+      const flmY = ((lm.y * vh - sy) / side) * ch;
+      const d = Math.hypot(flmX - mirrorX, flmY - mirrorY);
+      if (d < closestDist) {
+        closestDist = d;
+        closestFacePt = { x: flmX, y: flmY };
       }
+    }
+
+    // Si el dedo está sobre o muy cerca de la cara (< 50px de la piel)
+    if (closestDist < 50 && closestFacePt) {
+      fingerOnFace = true;
+      handleFingerPointing(closestFacePt.x, closestFacePt.y);
+      return;
     }
   }
 
+  // Si no hay dedo sobre la cara pero estábamos fijando zona
   if (state === 'FIJANDO_ZONA') {
-    if (targetZone && targetZone.progress >= 0.85) {
+    if (targetZone && targetZone.progress >= 0.75) {
+      // Se retiró el dedo tras sostenerlo -> ¡Disparar análisis clínico!
       triggerClinicalAnalysis(targetZone);
     } else {
+      // Se retiró antes de tiempo -> reiniciar
       state = 'BUSCANDO';
       targetZone = null;
       $('instruction').textContent = 'Señala una zona de tu rostro con el índice.';
       $('scan-progress').value = 0;
     }
   }
-}
-
-function getFaceBounds(landmarks, vw, vh, sx, sy, side, cw, ch) {
-  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-  for (const lm of landmarks) {
-    const px = cw - ((lm.x * vw - sx) / side * cw);
-    const py = (lm.y * vh - sy) / side * ch;
-    if (px < minX) minX = px;
-    if (px > maxX) maxX = px;
-    if (py < minY) minY = py;
-    if (py > maxY) maxY = py;
-  }
-  return { minX, maxX, minY, maxY, width: maxX - minX, height: maxY - minY };
-}
-
-function isPointInsideFace(px, py, b) {
-  const marginX = b.width * 0.08, marginY = b.height * 0.08;
-  return px >= b.minX + marginX && px <= b.maxX - marginX &&
-         py >= b.minY + marginY && py <= b.maxY - marginY;
 }
 
 function handleFingerPointing(x, y) {
@@ -343,10 +367,11 @@ function handleFingerPointing(x, y) {
     targetZone = { x, y, radius, startTs: now, progress: 0 };
     $('instruction').textContent = 'Mantén tu dedo para fijar la zona…';
   } else {
-    targetZone.x = targetZone.x * 0.8 + x * 0.2;
-    targetZone.y = targetZone.y * 0.8 + y * 0.2;
+    // Suavizado del punto para que acompañe el rostro
+    targetZone.x = targetZone.x * 0.75 + x * 0.25;
+    targetZone.y = targetZone.y * 0.75 + y * 0.25;
     const elapsed = now - targetZone.startTs;
-    targetZone.progress = Math.min(1.0, elapsed / 1200);
+    targetZone.progress = Math.min(1.0, elapsed / 1100); // 1.1 segundos
     $('scan-progress').value = targetZone.progress;
 
     if (targetZone.progress >= 1.0) {
@@ -364,7 +389,7 @@ function triggerClinicalAnalysis(zone) {
 
   setTimeout(() => {
     performDermatologicalCalculations(zone);
-  }, 150);
+  }, 120);
 }
 
 function performDermatologicalCalculations(zone) {
@@ -458,7 +483,7 @@ function rgb2lab(r, g, b) {
   let rL = r / 255, gL = g / 255, bL = b / 255;
   rL = rL > 0.04045 ? Math.pow((rL + 0.055) / 1.055, 2.4) : rL / 12.92;
   gL = gL > 0.04045 ? Math.pow((gL + 0.055) / 1.055, 2.4) : gL / 12.92;
-  bL = bL > 0.04045 ? Math.pow((bL + 0.055) / 1.055, 2.4) : bL / 12.92;
+  bL = bL > 0.04045 ? Math.pow((gL + 0.055) / 1.055, 2.4) : bL / 12.92;
 
   const X = (rL * 0.4124 + gL * 0.3576 + bL * 0.1805) / 0.95047;
   const Y = (rL * 0.2126 + gL * 0.7152 + bL * 0.0722) / 1.00000;
@@ -546,6 +571,15 @@ function renderDiagnosticUI() {
   $('dryness-detail').textContent = measurement(v.dryness_cues, ' %');
 }
 
+function selectZoneAtScreenPoint(clientX, clientY) {
+  if (state === 'ANALIZANDO') return;
+  const rect = cameraCanvas.getBoundingClientRect();
+  const x = ((clientX - rect.left) / rect.width) * cameraCanvas.width;
+  const y = ((clientY - rect.top) / rect.height) * cameraCanvas.height;
+  targetZone = { x, y, radius: 28, startTs: performance.now(), progress: 1.0 };
+  triggerClinicalAnalysis(targetZone);
+}
+
 function setupEventListeners() {
   $('visual-mode').addEventListener('click', () => {
     mode = 'visual';
@@ -561,24 +595,28 @@ function setupEventListeners() {
     renderDiagnosticUI();
   });
 
+  // Tocar o hacer clic en el espejo (funciona en canvas y en el marco stage)
+  const cameraStage = document.querySelector('.camera-stage');
+  if (cameraStage) {
+    cameraStage.addEventListener('pointerdown', (e) => {
+      selectZoneAtScreenPoint(e.clientX, e.clientY);
+    });
+  }
+
   cameraCanvas.addEventListener('pointerdown', (e) => {
-    if (state === 'ANALIZANDO') return;
-    const rect = cameraCanvas.getBoundingClientRect();
-    const x = (e.clientX - rect.left) / rect.width * cameraCanvas.width;
-    const y = (e.clientY - rect.top) / rect.height * cameraCanvas.height;
-    targetZone = { x, y, radius: 28, startTs: performance.now(), progress: 1.0 };
-    triggerClinicalAnalysis(targetZone);
+    selectZoneAtScreenPoint(e.clientX, e.clientY);
   });
 
   $('restart').addEventListener('click', () => {
     state = 'BUSCANDO';
     targetZone = null;
+    lastFingertip = null;
     diagnosticData = null;
     zoom.clearRect(0, 0, 224, 224);
     $('closeup-empty').hidden = false;
     $('closeup').parentElement.dataset.captured = 'false';
     $('skin-type').textContent = 'Sin evaluar';
-    $('instruction').textContent = 'Señala una zona de tu rostro con el índice.';
+    $('instruction').textContent = 'Señala una zona de tu rostro con el índice o haz clic.';
     $('scan-progress').value = 0;
     $('restart').disabled = true;
     $('open-questionnaire').disabled = true;
@@ -696,7 +734,6 @@ function renderRecommendations(items, age, group) {
   }
 }
 
-// Arranque seguro sin perder el evento DOMContentLoaded
 function boot() {
   setupEventListeners();
   initCamera();
