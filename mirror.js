@@ -1,4 +1,4 @@
-// REGEN · Espejo Inteligente de Diagnóstico Dermatoscópico (Client-Side Web v2.4)
+// REGEN · Espejo Inteligente de Diagnóstico Dermatoscópico (Client-Side Web v2.5)
 
 // Redirigir automáticamente a HTTPS si se entra por HTTP (la webcam requiere HTTPS)
 if (location.protocol === 'http:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
@@ -15,10 +15,10 @@ const measurement = (val, unit = '') => Number.isFinite(val) ? formatter.format(
 const phototypeLabels = ['', 'Fototipo I (Muy claro)', 'Fototipo II (Claro)', 'Fototipo III (Intermedio / Trigueño)', 'Fototipo IV (Trigueño / Moreno)', 'Fototipo V (Oscuro)', 'Fototipo VI (Muy oscuro)'];
 const phototypeRoman = ['', 'I', 'II', 'III', 'IV', 'V', 'VI'];
 
-// Estados: 'BUSCANDO' | 'FIJANDO_DEDO' | 'ANALIZANDO' | 'DIAGNOSTICADO'
+// Estados: 'BUSCANDO' | 'FIJANDO_DEDO' | 'ESPERANDO_DESPEJE' | 'ANALIZANDO' | 'DIAGNOSTICADO'
 let state = 'BUSCANDO';
 let mode = 'visual'; // 'visual' | 'appearance'
-let targetZone = null; // { x, y, radius, startTs, progress }
+let targetZone = null; // { x, y, radius, startTs, progress, lockTime }
 let fingerTracker = null; // { x, y, active: bool }
 let diagnosticData = null;
 let scanLineY = 0;
@@ -26,6 +26,7 @@ let handsDetector = null;
 let handsReady = false;
 let isProcessingHands = false;
 let lastHandsProcessTime = 0;
+let clearStartTime = null;
 
 // Catálogo farmacognóstico determinista de Ronal
 const BOTANICAL_CATALOG = {
@@ -156,53 +157,78 @@ function initMediaPipeHands() {
 
 // 3. Procesamiento de Resultados de Manos
 function onHandResults(results) {
-  if (state === 'ANALIZANDO') return;
+  // Si ya estamos analizando o ya tenemos diagnóstico en pantalla, BLOQUEAR para evitar re-escaneos no deseados
+  if (state === 'ANALIZANDO' || state === 'DIAGNOSTICADO') {
+    fingerTracker = null;
+    return;
+  }
+
   const cw = cameraCanvas.width, ch = cameraCanvas.height;
+  const now = performance.now();
+  const hasHands = results.multiHandLandmarks && results.multiHandLandmarks.length > 0;
 
-  if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+  if (hasHands) {
     const lm = results.multiHandLandmarks[0];
-    // Landmark 8: Punta del dedo índice
-    const tip = lm[8];
-
-    // Dado que MediaPipe analiza la imagen del canvas ya reflejada, las coordenadas son directas
+    const tip = lm[8]; // Landmark 8 = Punta del dedo índice
     const fingerX = tip.x * cw;
     const fingerY = tip.y * ch;
 
     fingerTracker = { x: fingerX, y: fingerY, active: true };
 
-    // Comprobar si el dedo está dentro del área visible del espejo
     const distFromCenter = Math.hypot(fingerX - cw / 2, fingerY - ch / 2);
-    if (distFromCenter < cw * 0.46) {
-      handlePointingInteraction(fingerX, fingerY);
+    const isInsideMirror = distFromCenter < cw * 0.46;
+
+    if (state === 'BUSCANDO' || state === 'FIJANDO_DEDO') {
+      if (isInsideMirror) {
+        handlePointingInteraction(fingerX, fingerY, now);
+        return;
+      }
+    } else if (state === 'ESPERANDO_DESPEJE') {
+      // La mano sigue frente al espejo; esperar que la retire para ver la piel limpia
+      clearStartTime = null;
+      // Timeout de 6 segundos por si nunca retira la mano
+      if (targetZone && (now - targetZone.lockTime > 6000)) {
+        state = 'BUSCANDO';
+        targetZone = null;
+        $('instruction').textContent = 'Señala tu mejilla con el dedo o toca la pantalla.';
+        $('scan-progress').value = 0;
+      }
       return;
     }
   } else {
     fingerTracker = null;
   }
 
-  // Si se retiró la mano mientras se fijaba la zona
+  // Cuando la mano NO está en el área facial del espejo:
   if (state === 'FIJANDO_DEDO') {
-    if (targetZone && targetZone.progress >= 0.50) {
-      // Dedo fijó la zona y se retiró -> ¡Disparar análisis clínico inmediato!
-      triggerAnalysisAtPoint(targetZone.x, targetZone.y, 'Zona señalada con el índice');
+    if (targetZone && targetZone.progress >= 0.6) {
+      // Si ya casi completaba el aro y retiró la mano: fijar e iniciar despeje
+      lockZoneForScan(targetZone.x, targetZone.y, now);
     } else {
       state = 'BUSCANDO';
       targetZone = null;
       $('instruction').textContent = 'Señala tu mejilla con el dedo o toca la pantalla.';
       $('scan-progress').value = 0;
     }
+  } else if (state === 'ESPERANDO_DESPEJE') {
+    // La mano se ha retirado del área -> dar 250ms de margen para que la mejilla quede completamente limpia
+    if (!clearStartTime) {
+      clearStartTime = now;
+    } else if (now - clearStartTime >= 250) {
+      clearStartTime = null;
+      triggerAnalysisAtPoint(targetZone.x, targetZone.y, 'Zona señalada con el índice');
+    }
   }
 }
 
-// Maneja la fijación cuando el dedo apunta a la cara
-function handlePointingInteraction(x, y) {
-  const now = performance.now();
+// Maneja la fijación gradual cuando el dedo apunta a la mejilla
+function handlePointingInteraction(x, y, now) {
   const radius = 28;
 
   if (state !== 'FIJANDO_DEDO' || !targetZone) {
     state = 'FIJANDO_DEDO';
     targetZone = { x, y, radius, startTs: now, progress: 0 };
-    $('instruction').textContent = 'Mantén tu dedo quieto en tu mejilla…';
+    $('instruction').textContent = 'Mantén tu dedo quieto en esa zona…';
   } else {
     const distMoved = Math.hypot(x - targetZone.x, y - targetZone.y);
     if (distMoved > 65) {
@@ -216,15 +242,41 @@ function handlePointingInteraction(x, y) {
       targetZone.x = targetZone.x * 0.75 + x * 0.25;
       targetZone.y = targetZone.y * 0.75 + y * 0.25;
       const elapsed = now - targetZone.startTs;
-      targetZone.progress = Math.min(1.0, elapsed / 750); // 0.75s para fijar
+      targetZone.progress = Math.min(1.0, elapsed / 550); // 0.55s para fijar
       $('scan-progress').value = targetZone.progress;
 
       if (targetZone.progress >= 1.0) {
-        // Disparar análisis de inmediato sin obligar a retirar la mano
-        triggerAnalysisAtPoint(targetZone.x, targetZone.y, 'Zona señalada con el índice');
+        lockZoneForScan(targetZone.x, targetZone.y, now);
       }
     }
   }
+}
+
+function lockZoneForScan(x, y, now) {
+  playLockChime();
+  state = 'ESPERANDO_DESPEJE';
+  targetZone = { x, y, radius: 28, lockTime: now, progress: 1.0 };
+  $('scan-progress').value = 1.0;
+  $('instruction').textContent = '✨ ¡Zona fijada! Retira tu mano para escanear…';
+}
+
+function playLockChime() {
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    const actx = new AudioCtx();
+    const osc = actx.createOscillator();
+    const gain = actx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(880, actx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(1320, actx.currentTime + 0.12);
+    gain.gain.setValueAtTime(0.06, actx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + 0.14);
+    osc.connect(gain);
+    gain.connect(actx.destination);
+    osc.start();
+    osc.stop(actx.currentTime + 0.14);
+  } catch (e) {}
 }
 
 // 4. Bucle Principal de Renderizado del Espejo
@@ -306,7 +358,7 @@ function drawHUDOverlays() {
   }
 
   // 3. Anillos de Zona Seleccionada (en la coordenada exacta)
-  if (targetZone && (state === 'FIJANDO_DEDO' || state === 'DIAGNOSTICADO' || state === 'ANALIZANDO')) {
+  if (targetZone && (state === 'FIJANDO_DEDO' || state === 'ESPERANDO_DESPEJE' || state === 'DIAGNOSTICADO' || state === 'ANALIZANDO')) {
     drawZoneHighlight(targetZone);
   }
 
@@ -404,6 +456,16 @@ function drawZoneHighlight(zone) {
     ctx.lineWidth = 3.5;
     ctx.beginPath();
     ctx.arc(x, y, radius * 1.55, -Math.PI / 2, -Math.PI / 2 + 2 * Math.PI * progress);
+    ctx.stroke();
+  } else if (state === 'ESPERANDO_DESPEJE') {
+    // Aro completo pulsante indicando que la zona está fijada y esperando despeje de la mano
+    const pulse = Math.sin(performance.now() / 120) * 0.3 + 0.7;
+    ctx.strokeStyle = `rgba(255, 216, 133, ${pulse})`;
+    ctx.lineWidth = 3.5;
+    ctx.shadowColor = '#ffe4a6';
+    ctx.shadowBlur = 14;
+    ctx.beginPath();
+    ctx.arc(x, y, radius * 1.55, 0, Math.PI * 2);
     ctx.stroke();
   }
 
@@ -536,8 +598,9 @@ function performCalibratedDermatologicalAnalysis(zone) {
 
   state = 'DIAGNOSTICADO';
   document.querySelector('.camera-stage').dataset.state = 'DIAGNOSTICADO';
-  $('instruction').textContent = '✅ Análisis listo. Revisa tu lectura o señala otra zona.';
+  $('instruction').textContent = '✅ Análisis listo. Revisa tu lectura o pulsa "Evaluar otra zona".';
   $('restart').disabled = false;
+  $('restart').textContent = 'Evaluar otra zona';
   $('new-person').disabled = false;
   $('open-questionnaire').disabled = false;
 
@@ -662,19 +725,18 @@ function setupEventListeners() {
   const cameraStage = document.querySelector('.camera-stage');
   if (cameraStage) {
     cameraStage.addEventListener('pointerdown', (e) => {
+      // Ignorar clics si ya estamos analizando
+      if (state === 'ANALIZANDO') return;
       selectZoneAtScreenPoint(e.clientX, e.clientY);
     });
   }
-
-  cameraCanvas.addEventListener('pointerdown', (e) => {
-    selectZoneAtScreenPoint(e.clientX, e.clientY);
-  });
 
   $('restart').addEventListener('click', () => {
     state = 'BUSCANDO';
     targetZone = null;
     fingerTracker = null;
     diagnosticData = null;
+    clearStartTime = null;
     zoom.clearRect(0, 0, 224, 224);
     $('closeup-empty').hidden = false;
     $('closeup').parentElement.dataset.captured = 'false';
@@ -682,6 +744,7 @@ function setupEventListeners() {
     $('instruction').textContent = 'Ponte frente al espejo. Señala tu mejilla con el dedo o toca la pantalla.';
     $('scan-progress').value = 0;
     $('restart').disabled = true;
+    $('restart').textContent = 'Repetir zona';
     $('open-questionnaire').disabled = true;
     document.querySelector('.product').dataset.ready = 'false';
     document.querySelector('.camera-stage').dataset.state = 'BUSCANDO';
