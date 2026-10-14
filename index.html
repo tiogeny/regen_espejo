@@ -5,10 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#323823">
   <title>REGEN · Tu espejo personal</title>
-  <link rel="stylesheet" href="./mirror.css?v=2.2">
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+  <link rel="stylesheet" href="./mirror.css?v=2.4">
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
-  <script type="module" src="./mirror.js?v=2.2"></script>
+  <script type="module" src="./mirror.js?v=2.4"></script>
 </head>
 <body>
   <svg class="symbols" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
@@ -27,7 +27,7 @@
     </header>
     <section class="camera-stage" aria-label="Espejo en vivo">
       <canvas id="camera" width="720" height="720" aria-label="Imagen de la cámara reflejada como un espejo"></canvas>
-      <video id="webcam-video" playsinline autoplay muted style="display:none;"></video>
+      <video id="webcam-video" playsinline autoplay muted style="position:fixed;top:-9999px;left:-9999px;width:640px;height:480px;opacity:0;pointer-events:none;"></video>
       <div class="glass" aria-hidden="true"></div>
       <div class="inner-ring" aria-hidden="true"></div>
       <div id="camera-empty" class="camera-empty"><svg><use href="#leaf"/></svg><p>Tu piel, de cerca.</p><span id="camera-message">Esperando permiso de cámara…</span></div>

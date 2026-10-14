@@ -1,4 +1,4 @@
-// REGEN · Espejo Inteligente de Diagnóstico Dermatoscópico (Client-Side Web v2.2)
+// REGEN · Espejo Inteligente de Diagnóstico Dermatoscópico (Client-Side Web v2.4)
 
 // Redirigir automáticamente a HTTPS si se entra por HTTP (la webcam requiere HTTPS)
 if (location.protocol === 'http:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
@@ -22,11 +22,9 @@ let targetZone = null; // { x, y, radius, startTs, progress }
 let fingerTracker = null; // { x, y, active: bool }
 let diagnosticData = null;
 let scanLineY = 0;
-let faceMesh = null;
 let handsDetector = null;
-let faceMeshReady = false;
 let handsReady = false;
-let latestFaceLandmarks = null;
+let isProcessingHands = false;
 let lastHandsProcessTime = 0;
 
 // Catálogo farmacognóstico determinista de Ronal
@@ -113,9 +111,9 @@ async function initCamera() {
     $('camera-empty').hidden = true;
     statusEl.textContent = 'Cámara conectada';
     statusEl.dataset.connected = 'true';
-    $('instruction').textContent = 'Ponte frente al espejo. Señala tu mejilla o toca la pantalla.';
+    $('instruction').textContent = 'Ponte frente al espejo. Señala tu mejilla con el dedo o toca la pantalla.';
 
-    initMediaPipeTrackers();
+    initMediaPipeHands();
     requestAnimationFrame(renderLoop);
   } catch (err) {
     statusEl.textContent = 'Permiso pendiente';
@@ -132,8 +130,8 @@ async function initCamera() {
   }
 }
 
-// 2. Inicialización de MediaPipe FaceMesh & Hands (API Global Estable)
-function initMediaPipeTrackers() {
+// 2. Inicialización de MediaPipe Hands (Detección de Dedo Índice en Tiempo Real)
+function initMediaPipeHands() {
   if (typeof window.Hands !== 'undefined') {
     try {
       handsDetector = new window.Hands({
@@ -142,64 +140,40 @@ function initMediaPipeTrackers() {
       handsDetector.setOptions({
         maxNumHands: 1,
         modelComplexity: 1,
-        minDetectionConfidence: 0.45,
-        minTrackingConfidence: 0.45
+        minDetectionConfidence: 0.4,
+        minTrackingConfidence: 0.4
       });
       handsDetector.onResults(onHandResults);
       handsReady = true;
-      console.log("MediaPipe Hands activo.");
+      console.log("[REGEN] MediaPipe Hands inicializado exitosamente.");
     } catch (e) {
-      console.warn("No se pudo iniciar MediaPipe Hands:", e);
+      console.warn("[REGEN] Fallback en manos:", e);
     }
-  }
-
-  if (typeof window.FaceMesh !== 'undefined') {
-    try {
-      faceMesh = new window.FaceMesh({
-        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
-      });
-      faceMesh.setOptions({
-        maxNumFaces: 1,
-        refineLandmarks: false,
-        minDetectionConfidence: 0.5,
-        minTrackingConfidence: 0.5
-      });
-      faceMesh.onResults(onFaceResults);
-      faceMeshReady = true;
-      console.log("MediaPipe FaceMesh activo.");
-    } catch (e) {
-      console.warn("No se pudo iniciar MediaPipe FaceMesh:", e);
-    }
+  } else {
+    setTimeout(initMediaPipeHands, 300);
   }
 }
 
-// 3. Recepción de Resultados de MediaPipe Hands
+// 3. Procesamiento de Resultados de Manos
 function onHandResults(results) {
   if (state === 'ANALIZANDO') return;
   const cw = cameraCanvas.width, ch = cameraCanvas.height;
-  const vw = video.videoWidth, vh = video.videoHeight;
-  if (!vw || !vh) return;
-
-  const side = Math.min(vw, vh);
-  const sx = (vw - side) / 2, sy = (vh - side) / 2;
 
   if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
     const lm = results.multiHandLandmarks[0];
-    // Landmark 8 = Punta del dedo índice
+    // Landmark 8: Punta del dedo índice
     const tip = lm[8];
-    const tipX = tip.x * vw;
-    const tipY = tip.y * vh;
 
-    // Coordenadas reflejadas para que coincida exactamente con lo que el usuario ve
-    const mirrorX = cw - ((tipX - sx) / side * cw);
-    const mirrorY = ((tipY - sy) / side) * ch;
+    // Dado que MediaPipe analiza la imagen del canvas ya reflejada, las coordenadas son directas
+    const fingerX = tip.x * cw;
+    const fingerY = tip.y * ch;
 
-    fingerTracker = { x: mirrorX, y: mirrorY, active: true };
+    fingerTracker = { x: fingerX, y: fingerY, active: true };
 
-    // Comprobar si el dedo está dentro del espejo
-    const distCenter = Math.hypot(mirrorX - cw / 2, mirrorY - ch / 2);
-    if (distCenter < cw * 0.44) {
-      handlePointingInteraction(mirrorX, mirrorY);
+    // Comprobar si el dedo está dentro del área visible del espejo
+    const distFromCenter = Math.hypot(fingerX - cw / 2, fingerY - ch / 2);
+    if (distFromCenter < cw * 0.46) {
+      handlePointingInteraction(fingerX, fingerY);
       return;
     }
   } else {
@@ -208,25 +182,19 @@ function onHandResults(results) {
 
   // Si se retiró la mano mientras se fijaba la zona
   if (state === 'FIJANDO_DEDO') {
-    if (targetZone && targetZone.progress >= 0.70) {
-      // Dedo sostenido y luego retirado -> ¡Disparar análisis en esa zona!
+    if (targetZone && targetZone.progress >= 0.50) {
+      // Dedo fijó la zona y se retiró -> ¡Disparar análisis clínico inmediato!
       triggerAnalysisAtPoint(targetZone.x, targetZone.y, 'Zona señalada con el índice');
     } else {
       state = 'BUSCANDO';
       targetZone = null;
-      $('instruction').textContent = 'Señala tu mejilla o toca la pantalla.';
+      $('instruction').textContent = 'Señala tu mejilla con el dedo o toca la pantalla.';
       $('scan-progress').value = 0;
     }
   }
 }
 
-function onFaceResults(results) {
-  if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
-    latestFaceLandmarks = results.multiFaceLandmarks[0];
-  }
-}
-
-// Maneja la fijación gradual cuando el dedo apunta a la cara
+// Maneja la fijación cuando el dedo apunta a la cara
 function handlePointingInteraction(x, y) {
   const now = performance.now();
   const radius = 28;
@@ -234,17 +202,27 @@ function handlePointingInteraction(x, y) {
   if (state !== 'FIJANDO_DEDO' || !targetZone) {
     state = 'FIJANDO_DEDO';
     targetZone = { x, y, radius, startTs: now, progress: 0 };
-    $('instruction').textContent = 'Mantén tu dedo quieto en esa zona…';
+    $('instruction').textContent = 'Mantén tu dedo quieto en tu mejilla…';
   } else {
-    // Acompañar el movimiento del dedo suavemente
-    targetZone.x = targetZone.x * 0.6 + x * 0.4;
-    targetZone.y = targetZone.y * 0.6 + y * 0.4;
-    const elapsed = now - targetZone.startTs;
-    targetZone.progress = Math.min(1.0, elapsed / 1000); // 1.0 segundo para fijar
-    $('scan-progress').value = targetZone.progress;
+    const distMoved = Math.hypot(x - targetZone.x, y - targetZone.y);
+    if (distMoved > 65) {
+      // Si movió la mano bruscamente a otra parte: reubicar zona objetivo
+      targetZone.x = x;
+      targetZone.y = y;
+      targetZone.startTs = now;
+      targetZone.progress = 0;
+    } else {
+      // Pequeño temblor natural de la mano: suavizar posición
+      targetZone.x = targetZone.x * 0.75 + x * 0.25;
+      targetZone.y = targetZone.y * 0.75 + y * 0.25;
+      const elapsed = now - targetZone.startTs;
+      targetZone.progress = Math.min(1.0, elapsed / 750); // 0.75s para fijar
+      $('scan-progress').value = targetZone.progress;
 
-    if (targetZone.progress >= 1.0) {
-      $('instruction').textContent = '¡Zona fijada! Retira tu mano para analizar.';
+      if (targetZone.progress >= 1.0) {
+        // Disparar análisis de inmediato sin obligar a retirar la mano
+        triggerAnalysisAtPoint(targetZone.x, targetZone.y, 'Zona señalada con el índice');
+      }
     }
   }
 }
@@ -252,25 +230,29 @@ function handlePointingInteraction(x, y) {
 // 4. Bucle Principal de Renderizado del Espejo
 function renderLoop() {
   if (video.readyState >= 2) {
-    drawMirrorFrame();
+    // 1. Dibujar fotograma de video reflejado limpio en el canvas
+    drawCameraBase();
 
     const now = performance.now();
-    // Enviar fotograma a MediaPipe cada 45 ms (aprox. 22 FPS para máxima fluidez)
-    if (now - lastHandsProcessTime >= 45) {
+    // 2. Enviar la imagen limpia del canvas a MediaPipe
+    if (handsReady && handsDetector && !isProcessingHands && (now - lastHandsProcessTime >= 35)) {
+      isProcessingHands = true;
       lastHandsProcessTime = now;
-      if (handsReady && handsDetector) {
-        handsDetector.send({ image: video }).catch(() => {});
-      }
-      if (faceMeshReady && faceMesh) {
-        faceMesh.send({ image: video }).catch(() => {});
-      }
+      handsDetector.send({ image: cameraCanvas })
+        .catch((e) => console.warn('[REGEN] Error procesando manos:', e))
+        .finally(() => {
+          isProcessingHands = false;
+        });
     }
+
+    // 3. Dibujar gráficos Sci-Fi (HUD, mirilla del dedo, anillos de zona, láser)
+    drawHUDOverlays();
   }
   requestAnimationFrame(renderLoop);
 }
 
-// Dibuja el fotograma en el canvas reflejado con efectos Sci-Fi PRO
-function drawMirrorFrame() {
+// Dibuja el fotograma de la webcam reflejado en el canvas
+function drawCameraBase() {
   const cw = cameraCanvas.width, ch = cameraCanvas.height;
   const vw = video.videoWidth, vh = video.videoHeight;
   if (!vw || !vh) return;
@@ -279,35 +261,47 @@ function drawMirrorFrame() {
   const sx = (vw - side) / 2, sy = (vh - side) / 2;
 
   ctx.save();
-  // Efecto espejo: invertir horizontalmente
   ctx.translate(cw, 0);
   ctx.scale(-1, 1);
   ctx.drawImage(video, sx, sy, side, side, 0, 0, cw, ch);
   ctx.restore();
+}
 
-  // 1. Brackets Tácticos HUD de Alta Tecnología (Elegantes y Minimalistas)
+// Dibuja los gráficos tácticos Sci-Fi y el cursor de seguimiento
+function drawHUDOverlays() {
+  const cw = cameraCanvas.width, ch = cameraCanvas.height;
+
+  // 1. Brackets Tácticos HUD de Alta Tecnología
   drawTacticalHUD(cw, ch);
 
-  // 2. Puntero Dorado en la Punta del Dedo
+  // 2. Puntero Dorado en la Punta del Dedo Índice
   if (fingerTracker && fingerTracker.active) {
     ctx.save();
     ctx.fillStyle = '#dfc185';
     ctx.shadowColor = '#ffe4a6';
-    ctx.shadowBlur = 14;
+    ctx.shadowBlur = 18;
     ctx.beginPath();
-    ctx.arc(fingerTracker.x, fingerTracker.y, 8, 0, Math.PI * 2);
+    ctx.arc(fingerTracker.x, fingerTracker.y, 9, 0, Math.PI * 2);
     ctx.fill();
 
     // Cruz sutil de enfoque sobre el dedo
     ctx.strokeStyle = '#fff0cf';
     ctx.lineWidth = 1.5;
-    const s = 14;
+    const s = 16;
     ctx.beginPath();
     ctx.moveTo(fingerTracker.x - s, fingerTracker.y);
     ctx.lineTo(fingerTracker.x + s, fingerTracker.y);
     ctx.moveTo(fingerTracker.x, fingerTracker.y - s);
     ctx.lineTo(fingerTracker.x, fingerTracker.y + s);
     ctx.stroke();
+
+    // Círculo fino radiante
+    ctx.strokeStyle = '#dfc185aa';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(fingerTracker.x, fingerTracker.y, 18, 0, Math.PI * 2);
+    ctx.stroke();
+
     ctx.restore();
   }
 
@@ -478,7 +472,6 @@ function performCalibratedDermatologicalAnalysis(zone) {
     totalB += lab.b;
 
     // Detección precisa de hiperpigmentación (diferencial de melanina contra piel base)
-    // Ignora contrastes causados por sombras duras
     if (lab.L < 52 && lab.b > 18 && (r - b > 32)) {
       spotPixels++;
       // Resaltar en dorado suave sobre el recorte ampliado
@@ -507,7 +500,6 @@ function performCalibratedDermatologicalAnalysis(zone) {
   const globalSpotPct = Number((spotPercentage * 0.72).toFixed(1));
 
   // 3. Estimación de Edad Biológica Cutánea Calibrada
-  // Se enfoca en microtextura cutánea sin confundir con vello/sombra
   let varianceSum = 0;
   for (let i = 0; i < data.length; i += 4) {
     const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
@@ -687,7 +679,7 @@ function setupEventListeners() {
     $('closeup-empty').hidden = false;
     $('closeup').parentElement.dataset.captured = 'false';
     $('skin-type').textContent = 'Sin evaluar';
-    $('instruction').textContent = 'Ponte frente al espejo. Señala tu mejilla o toca la pantalla.';
+    $('instruction').textContent = 'Ponte frente al espejo. Señala tu mejilla con el dedo o toca la pantalla.';
     $('scan-progress').value = 0;
     $('restart').disabled = true;
     $('open-questionnaire').disabled = true;
