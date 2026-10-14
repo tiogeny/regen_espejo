@@ -1,0 +1,36 @@
+# Raspberry Pi OS Lite: Cage toma tty1 y abre únicamente el espejo REGEN.
+[Unit]
+Description=REGEN - Espejo web a pantalla completa
+After=systemd-user-sessions.service plymouth-quit-wait.service dbus.socket systemd-logind.service derma-appliance.service
+Wants=dbus.socket systemd-logind.service derma-appliance.service
+Before=graphical.target
+Conflicts=getty@tty1.service
+After=getty@tty1.service
+ConditionPathExists=/dev/tty0
+
+[Service]
+Type=simple
+User=raspberry
+Group=raspberry
+SupplementaryGroups=video render input
+PAMName=regen-kiosk
+Environment=XDG_SESSION_TYPE=wayland
+Environment=XDG_SESSION_DESKTOP=cage
+Environment=LIBSEAT_BACKEND=logind
+Environment=DERMA_MOBILE_PORT=8080
+ExecStart=/usr/bin/dbus-run-session -- /usr/bin/cage -s -- /bin/bash /opt/derma-onedge/deploy/launch-regen-kiosk.sh
+ExecStartPost=+/usr/bin/chvt 1
+Restart=always
+RestartSec=3
+UtmpIdentifier=tty1
+UtmpMode=user
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+StandardInput=tty-fail
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=graphical.target

@@ -1,0 +1,105 @@
+--- a/demo_camara.py
++++ b/demo_camara.py
+@@ -47,6 +47,7 @@
+ from mediapipe.tasks import python as mp_python
+ from mediapipe.tasks.python import vision
+ 
++from src.mobile.server import ScanControl, start_mobile_server
+ from src.api.app import app
+ from src.config import (
+     MIN_STABILITY_DURATION_MS,
+@@ -177,6 +178,7 @@
+         self.stability_start_time    = None
+         self.max_movement_px         = 14.0
+         self.movement_warning_until  = 0.0
++        self.mobile_control = ScanControl()
+         self.state                   = "BUSCANDO"
+         self.last_result             = None
+         self.last_mask               = None
+@@ -359,12 +361,25 @@
+ 
+     # ── Diagnóstico ───────────────────────────────────────────────────────────
+ 
++    def restart_scan(self):
++        """Repite la captura conservando la sesión y sus lecturas previas."""
++        self.state = "BUSCANDO"
++        self.reset_stability()
++        self.last_diagnosis_time = None
++        for field in ("last_result", "last_mask", "last_face_box", "last_face_roi",
++                      "last_landmarks", "last_phototype_info", "last_stratified_result",
++                      "last_optical_info"):
++            setattr(self, field, None)
++        self.toast_message = "Escaneo reiniciado"
++        self.toast_until = time.time() + 2.5
++
+     def execute_diagnosis(
+         self,
+         face_rois,
+         face_box: Optional[Tuple] = None,
+         is_adjustment: bool = False,
+     ) -> dict:
++        self.mobile_control.publish("ANALIZANDO", len(self.session_ages))
+         frames_to_eval = [face_rois] if isinstance(face_rois, np.ndarray) else list(face_rois)
+         if not frames_to_eval:
+             return {"error": "Sin frames para evaluar"}
+@@ -553,12 +568,22 @@
+ 
+         self.last_frame_time = time.perf_counter()
+ 
++        mobile_server = None
+         try:
++            if os.getenv("DERMA_MOBILE", "0") == "1":
++                mobile_server = start_mobile_server(
++                    self.mobile_control, int(os.getenv("DERMA_MOBILE_PORT", "8080"))
++                )
+             while True:
+                 ret, frame = cap.read()
+                 if not ret:
+                     log.warning("Error al leer fotograma")
+                     break
++
++                self.mobile_control.apply_pending(self.restart_scan)
++                self.mobile_control.publish(
++                    self.state, len(self.session_ages), self.last_result, self.session_id
++                )
+ 
+                 # FPS EMA
+                 t_now = time.perf_counter()
+@@ -640,6 +665,10 @@
+                 elif not detection_result.face_landmarks and self.state != "DIAGNOSTICADO":
+                     self.reset_stability()
+ 
++                self.mobile_control.publish(
++                    self.state, len(self.session_ages), self.last_result, self.session_id
++                )
++
+                 # ── Renderizado y presentacion ────────────────────────────────
+                 # El HUD se dibuja siempre que haya un presentador: tanto X11
+                 # como DRM necesitan el frame ya dibujado, solo cambia por
+@@ -665,10 +694,10 @@
+                             self.finalize_session_and_restart()
+                         break
+                     elif key in [ord("r"), ord("R")]:
+-                        self.state = "BUSCANDO"
+-                        self.reset_stability()
+-                        self.last_diagnosis_time = None
++                        self.mobile_control.invalidate()
++                        self.restart_scan()
+                     elif key in [ord("n"), ord("N")]:
++                        self.mobile_control.invalidate()
+                         self.finalize_session_and_restart()
+                         self.state = "BUSCANDO"
+                         self.reset_stability()
+@@ -722,6 +751,12 @@
+                     time.sleep(0.01)
+ 
+         finally:
++            self.mobile_control.disconnect()
++            if mobile_server is not None:
++                server, thread, sock = mobile_server
++                server.should_exit = True
++                thread.join(timeout=3)
++                sock.close()
+             self.landmarker.close()
+             cap.release()
+             if not self.headless:

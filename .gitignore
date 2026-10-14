@@ -1,24 +1,73 @@
-# Logs
-logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
 
-node_modules
-dist
-dist-ssr
-*.local
+# Virtual Environments
+.venv/
+venv/
+ENV/
 
-# Editor directories and files
-.vscode/*
-!.vscode/extensions.json
-.idea
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Database & Lock files
+*.db
+*.sqlite
+*.sqlite3
+/run/
+tmpfs/
+
+# OS Specific
 .DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
+Thumbs.db
+desktop.ini
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Models
+!models/*.onnx
+!models/*.task
+!models/.gitkeep
+
+# Reportes PDF generados (se regeneran con hotkey [P])
+data/reportes/*.pdf
+
+# Sesiones CSV y datos de escaneo (generados en runtime)
+data/sesiones_edad/*.csv
+data/sesiones_edad/*.jpg
+
+# Cache de datasets de entrenamiento (muy pesado, se regenera)
+data/utkface_cache_224.pt
+data/*.pt
+
+# Calibración local de cámara (específica por dispositivo)
+data/config/calibracion_camara.json
+
+# Scratch / archivos temporales de depuración
+scratch/
+

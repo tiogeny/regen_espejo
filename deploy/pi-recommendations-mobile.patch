@@ -1,0 +1,97 @@
+--- a/src/mobile/server.py
++++ b/src/mobile/server.py
+@@ -6,6 +6,9 @@
+ import threading
+ import time
+ from pathlib import Path
++from typing import Literal
++from src.domain.recommendations import Questionnaire, recommend, localized_orientation
++from src.db.database import get_db
+ 
+ from fastapi import Depends, FastAPI, Header, HTTPException, Request
+ from fastapi.responses import FileResponse, Response
+@@ -21,6 +24,7 @@
+         self._revision = 0
+         self._applied_revision = None
+         self._samples = 0
++        self._result = None
+         self._diagnostic = None
+         self._diagnostic_key = None
+         self._preview = None
+@@ -79,6 +83,7 @@
+     def publish(self, state, samples, result=None, session_id=None):
+         with self._lock:
+             self._state = state
++            self._result = result if state == "DIAGNOSTICADO" else None
+             self._samples = samples
+             self._heartbeat = time.monotonic()
+             key = (id(result), session_id, samples)
+@@ -102,6 +107,30 @@
+                 result['diagnostic']['zone_preview_available'] = bool(
+                     self._analysis_preview and self._analysis_preview[0] == self._diagnostic['analysis_id'])
+             return result
++
++    def recommend_current(self, analysis_id, questionnaire, scope="zone", revision=None):
++        with self._lock:
++            if (self._state != "DIAGNOSTICADO" or self._pending is not None
++                    or (revision is not None and revision != self._revision)
++                    or time.monotonic() - self._heartbeat >= 10
++                    or not self._result or not self._diagnostic
++                    or self._diagnostic["analysis_id"] != analysis_id):
++                raise HTTPException(409, "La lectura cambió. Actualiza y completa el cuestionario de la lectura actual.")
++            data = self._result["datos"]
++            with get_db() as conn:
++                orientation = (localized_orientation() if scope == "zone" and data["clinica"].get("zona_seleccionada")
++                               else recommend(conn, data["clinica"]["porcentaje_hiperpigmentacion"], questionnaire))
++                orientation["alcance"] = "zona" if scope == "zone" and data["clinica"].get("zona_seleccionada") else "rostro_completo"
++                prescriptions = orientation.pop("prescripciones")
++                # Mantener el registro de reglas aplicado a la misma lectura.
++                with conn:
++                    conn.execute("DELETE FROM sesion_prescripciones WHERE sesion_id=?", (analysis_id,))
++                    for item in prescriptions:
++                        conn.execute("INSERT INTO sesion_prescripciones(sesion_id, regla_id) VALUES (?, ?)",
++                                     (analysis_id, item["regla_id"]))
++            data.update(prescripciones=prescriptions, orientacion=orientation)
++            self._diagnostic = project_diagnostic(self._result, self._diagnostic["session_id"], self._samples)
++            return deepcopy(self._diagnostic)
+ 
+     def request_restart(self, revision, new_person=False):
+         with self._lock:
+@@ -151,6 +180,13 @@
+             self._touch = None
+ 
+ 
++class RecommendationRequest(BaseModel):
++    analysis_id: str = Field(min_length=1)
++    questionnaire: Questionnaire
++    scope: Literal["zone", "face"] = "zone"
++    revision: int | None = Field(default=None, ge=0)
++
++
+ class RestartRequest(BaseModel):
+     revision: int = Field(ge=0)
+     new_person: bool = False
+@@ -207,6 +243,12 @@
+     def mirror_analysis_frame(analysis_id: str):
+         return Response(control.analysis_preview(analysis_id), media_type='image/jpeg')
+ 
++    @app.post('/mirror/api/recommendations', dependencies=[Depends(local_display)])
++    def mirror_recommendations(body: RecommendationRequest):
++        if body.revision is None:
++            raise HTTPException(422, "La revisión de la lectura es obligatoria.")
++        return control.recommend_current(body.analysis_id, body.questionnaire, body.scope, body.revision)
++
+     @app.post('/mirror/api/restart', status_code=202, dependencies=[Depends(local_display)])
+     def mirror_restart(body: RestartRequest):
+         control.request_restart(body.revision, body.new_person)
+@@ -229,6 +271,10 @@
+     @app.get("/api/status", dependencies=[Depends(authorize)])
+     def status():
+         return control.snapshot()
++
++    @app.post("/api/recommendations", dependencies=[Depends(authorize)])
++    def recommendations(body: RecommendationRequest):
++        return control.recommend_current(body.analysis_id, body.questionnaire, body.scope)
+ 
+     @app.post("/api/restart", status_code=202, dependencies=[Depends(authorize)])
+     def restart(body: RestartRequest):

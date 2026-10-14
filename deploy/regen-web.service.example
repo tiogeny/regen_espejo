@@ -1,0 +1,18 @@
+# Plantilla para un equipo nuevo. Ajustar User y rutas antes de instalar.
+[Unit]
+Description=REGEN - Camara y espejo web local
+After=network.target
+
+[Service]
+Type=simple
+User=derma
+WorkingDirectory=/opt/derma-onedge
+Environment=DERMA_WEB=1
+Environment=DERMA_TOUCH_MODE=1
+Environment=DERMA_MOBILE_PORT=8080
+ExecStart=/opt/derma-onedge/.venv/bin/python /opt/derma-onedge/demo_camara.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

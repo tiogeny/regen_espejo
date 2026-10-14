@@ -1,0 +1,19 @@
+--- a/demo_camara.py
++++ b/demo_camara.py
+@@ -48,6 +48,7 @@
+ from mediapipe.tasks.python import vision
+ 
+ from src.inference.region_analysis import CaptureRejected, capture_quality
++from src.inference.visual_appearance import analyze_visual_appearance
+ from src.inference.face_touch import FaceTouchSelector
+ from src.inference.segmentation import localized_spot_percentage
+ from src.mobile.server import ScanControl, start_mobile_server
+@@ -587,6 +588,8 @@
+             if response.status_code == 201:
+                 res_data = response.json()
+                 res_data['datos']['capture_quality'] = quality
++                res_data['datos']['visual_appearance'] = analyze_visual_appearance(
++                    cv2.cvtColor(primary_roi, cv2.COLOR_BGR2RGB), self.selected_region)
+                 res_data["metadatos"]["total_call_ms"] = round(total_call_ms, 2)
+                 res_data["datos"]["clinica"]["edad_biologica_estimada"]     = final_age
+                 res_data["datos"]["clinica"]["porcentaje_hiperpigmentacion"] = final_spots

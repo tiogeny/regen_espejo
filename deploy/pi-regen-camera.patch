@@ -1,0 +1,207 @@
+--- a/demo_camara.py
++++ b/demo_camara.py
+@@ -47,6 +47,8 @@
+ from mediapipe.tasks import python as mp_python
+ from mediapipe.tasks.python import vision
+ 
++from src.inference.face_touch import FaceTouchSelector
++from src.inference.segmentation import localized_spot_percentage
+ from src.mobile.server import ScanControl, start_mobile_server
+ from src.api.app import app
+ from src.config import (
+@@ -126,6 +128,7 @@
+ 
+     def __init__(self, camera_index: int = 0, headless: bool = False, api_port: int = 8000,
+                  presenter: str = "auto", drm_card: str = "/dev/dri/card0"):
++        self.web_mode = os.getenv('DERMA_WEB', '0') == '1'
+         self.camera_index = camera_index
+         self.headless     = headless
+         self.api_port     = api_port
+@@ -133,6 +136,9 @@
+             self.presenter = "none" if headless else "x11"
+         else:
+             self.presenter = presenter
++        if self.web_mode:
++            self.presenter = 'none'
++            self.headless = True
+         self.drm_card     = drm_card
+         self._drm         = None
+         self._drm_aviso   = None
+@@ -154,12 +160,28 @@
+         options = vision.FaceLandmarkerOptions(
+             base_options=base_options,
+             running_mode=vision.RunningMode.IMAGE,
+-            num_faces=1,
++            num_faces=2,
+             min_face_detection_confidence=0.5,
+             min_face_presence_confidence=0.5,
+             min_tracking_confidence=0.5,
+         )
+         self.landmarker = vision.FaceLandmarker.create_from_options(options)
++
++        self.touch_mode = self.web_mode and os.getenv('DERMA_TOUCH_MODE', '1') == '1'
++        self.touch_selector = FaceTouchSelector()
++        self.selected_region = None
++        self.touch_frame_time = 0.0
++        self.hand_landmarker = None
++        if self.touch_mode:
++            hand_path = models_dir / 'hand_landmarker.task'
++            if not hand_path.exists():
++                raise RuntimeError('Falta models/hand_landmarker.task')
++            hand_options = vision.HandLandmarkerOptions(
++                base_options=mp_python.BaseOptions(model_asset_path=str(hand_path)),
++                running_mode=vision.RunningMode.VIDEO, num_hands=2,
++                min_hand_detection_confidence=.6, min_hand_presence_confidence=.6,
++                min_tracking_confidence=.6)
++            self.hand_landmarker = vision.HandLandmarker.create_from_options(hand_options)
+ 
+         FLC = vision.FaceLandmarksConnections
+         conns_all = list(FLC.FACE_LANDMARKS_TESSELATION) + list(FLC.FACE_LANDMARKS_LEFT_IRIS) + list(FLC.FACE_LANDMARKS_RIGHT_IRIS)
+@@ -364,6 +386,9 @@
+     def restart_scan(self):
+         """Repite la captura conservando la sesión y sus lecturas previas."""
+         self.state = "BUSCANDO"
++        if self.touch_mode:
++            self.touch_selector.reset()
++            self.selected_region = None
+         self.reset_stability()
+         self.last_diagnosis_time = None
+         for field in ("last_result", "last_mask", "last_face_box", "last_face_roi",
+@@ -372,6 +397,73 @@
+             setattr(self, field, None)
+         self.toast_message = "Escaneo reiniciado"
+         self.toast_until = time.time() + 2.5
++
++    def process_touch_frame(self, frame, detection_result, now):
++        """Detectar dedo a un máximo de 8 Hz; captura solo tras retirar la mano."""
++        if self.state == "DIAGNOSTICADO":
++            # La selección acompaña al rostro también después de la lectura.
++            if len(detection_result.face_landmarks) == 1 and self.touch_selector.anchor is not None:
++                h, w = frame.shape[:2]
++                face = np.array([(p.x * w, p.y * h) for p in detection_result.face_landmarks[0]])
++                self.touch_selector.point = self.touch_selector.anchor.point(face)
++                self.touch_selector.radius = float(np.ptp(face[:, 0])) * .075
++            else:
++                self.touch_selector.point = None
++            self.mobile_control.publish_touch("COMPLETADO", "Zona evaluada. Reinicia para señalar otra zona.", 1.0)
++            return self.last_landmarks
++        if now - self.touch_frame_time < .125:
++            return getattr(self, "touch_landmarks", None)
++        self.touch_frame_time = now
++        h, w = frame.shape[:2]
++        face = None
++        if len(detection_result.face_landmarks) == 1:
++            face = np.array([(p.x * w, p.y * h) for p in detection_result.face_landmarks[0]], dtype=np.float32)
++        self.touch_landmarks = face
++        try:
++            small = cv2.resize(frame, (640, max(1, round(h * 640 / w))))
++            image = mp.Image(image_format=mp.ImageFormat.SRGB, data=cv2.cvtColor(small, cv2.COLOR_BGR2RGB))
++            hands_result = self.hand_landmarker.detect_for_video(image, int(now * 1000))
++            hands = [np.array([(p.x * w, p.y * h) for p in hand]) for hand in hands_result.hand_landmarks]
++            ready = self.touch_selector.update(face, hands, now)
++        except Exception:
++            self.touch_selector.reset()
++            self.selected_region = None
++            self.state = "BUSCANDO"
++            self.mobile_control.publish_touch("ERROR", "No se pudo detectar la mano. Repite el señalamiento.")
++            return face
++        self.mobile_control.publish_touch(self.touch_selector.state, self.touch_selector.message, self.touch_selector.progress)
++        self.state = "ESTABILIZANDO" if self.touch_selector.state == "ESTABILIZANDO" else "BUSCANDO"
++        if ready and face is not None:
++            min_x, min_y = np.min(face, axis=0)
++            max_x, max_y = np.max(face, axis=0)
++            cx, cy = int((min_x + max_x) / 2), int((min_y + max_y) / 2)
++            head_size = int(max(max_x - min_x, max_y - min_y) * 1.95)
++            safe_size = max(100, min(head_size, min(h, w) - 4))
++            roi, box = self.extract_canonical_face_roi(frame, cx, cy, head_size)
++            # Mismas coordenadas que el recorte, incluso si lleva padding en un borde.
++            canonical_box = (int(cx - safe_size * .50), int(cy - safe_size * .44), safe_size, safe_size)
++            self.selected_region = self.touch_selector.region_in_roi(face, canonical_box)
++            self.state, self.analyzing = "ANALIZANDO", True
++            self.mobile_control.publish("ANALIZANDO", len(self.session_ages), None, self.session_id)
++            self.last_landmarks = face.astype(np.int32)
++            try:
++                result = self.execute_diagnosis(roi, face_box=box)
++                if "error" in result:
++                    raise RuntimeError(result["error"])
++                self.last_result = result
++                self.state = "DIAGNOSTICADO"
++                self.last_diagnosis_time = time.time()
++            except Exception:
++                self.touch_selector.reset()
++                self.selected_region = None
++                self.last_result = None
++                self.state = "BUSCANDO"
++                self.toast_message = "No se pudo medir la zona. Revisa modelos y encuadre."
++                self.toast_until = time.time() + 5
++                self.mobile_control.publish_touch("ERROR", self.toast_message)
++            finally:
++                self.analyzing = False
++        return face
+ 
+     def execute_diagnosis(
+         self,
+@@ -480,6 +572,16 @@
+                 res_data["datos"]["clinica"]["fototipo_label"]              = phototype_res["clinical_label"]
+                 res_data["datos"]["clinica"]["ita_deg"]                     = phototype_res["ita"]
+                 res_data["datos"]["clinica"]["gafas_detectadas"]            = optical_res["glasses_detected"]
++                if self.selected_region is not None:
++                    clinical = res_data['datos']['clinica']
++                    clinical['zona_seleccionada'] = dict(self.selected_region)
++                    clinical['porcentaje_hiperpigmentacion_zona'] = localized_spot_percentage(
++                        self.last_mask, **self.selected_region)
++                    # Global face prescriptions do not apply to a selected circle.
++                    res_data['datos']['prescripciones'] = []
++                    res_data['datos']['orientacion'] = {
++                        'estado': 'no_aplicable_zona',
++                        'mensaje': 'Lectura localizada para revisión profesional. No se asigna una fórmula.'}
+                 if stratified_res:
+                     res_data["datos"]["clinica"]["estrato_etario"]      = stratified_res.age_group.value
+                     res_data["datos"]["clinica"]["indicacion_primaria"] = stratified_res.primary_indication
+@@ -570,7 +672,7 @@
+ 
+         mobile_server = None
+         try:
+-            if os.getenv("DERMA_MOBILE", "0") == "1":
++            if self.web_mode or os.getenv("DERMA_MOBILE", "0") == "1":
+                 mobile_server = start_mobile_server(
+                     self.mobile_control, int(os.getenv("DERMA_MOBILE_PORT", "8080"))
+                 )
+@@ -603,7 +705,10 @@
+                 face_box          = None
+                 stability_progress = 0.0
+ 
+-                if detection_result.face_landmarks and self.state != "DIAGNOSTICADO":
++                if self.touch_mode:
++                    pts = self.process_touch_frame(frame, detection_result, time.monotonic())
++                    stability_progress = self.touch_selector.progress
++                elif detection_result.face_landmarks and self.state != "DIAGNOSTICADO":
+                     face_lms = detection_result.face_landmarks[0]
+                     pts = np.array([(int(p.x * w), int(p.y * h)) for p in face_lms], dtype=np.int32)
+ 
+@@ -662,12 +767,15 @@
+                             self.stability_start_time = now
+                     self.prev_center = center
+ 
+-                elif not detection_result.face_landmarks and self.state != "DIAGNOSTICADO":
++                elif not self.touch_mode and not detection_result.face_landmarks and self.state != "DIAGNOSTICADO":
+                     self.reset_stability()
+ 
+                 self.mobile_control.publish(
+                     self.state, len(self.session_ages), self.last_result, self.session_id
+                 )
++
++                if self.web_mode:
++                    self.mobile_control.publish_preview(frame, self.touch_selector if self.touch_mode else None)
+ 
+                 # ── Renderizado y presentacion ────────────────────────────────
+                 # El HUD se dibuja siempre que haya un presentador: tanto X11
+@@ -758,6 +866,8 @@
+                 thread.join(timeout=3)
+                 sock.close()
+             self.landmarker.close()
++            if self.hand_landmarker is not None:
++                self.hand_landmarker.close()
+             cap.release()
+             if not self.headless:
+                 cv2.destroyAllWindows()

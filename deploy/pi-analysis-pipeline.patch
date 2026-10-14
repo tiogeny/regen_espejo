@@ -1,0 +1,37 @@
+--- a/src/inference/pipeline.py
++++ b/src/inference/pipeline.py
+@@ -11,6 +11,7 @@
+ from pathlib import Path
+ from typing import Tuple, Optional, Dict, Any
+ import numpy as np
++from src.inference.segmentation import spot_area_percentage, validate_probability
+ from src.config import MODELS_DIR
+ from src.logging_setup import get_logger, log_inference_event, log_model_load
+ 
+@@ -297,6 +298,8 @@
+         input_name = self._age_session.get_inputs()[0].name
+         outputs = self._age_session.run(None, {input_name: input_chw})
+         raw_age = float(np.squeeze(outputs[0]))
++        if not np.isfinite(raw_age):
++            raise RuntimeError('El modelo de edad devolvió un valor inválido')
+ 
+         # Calibración clínica de sesgo óptico/sensor de cámara
+         from src.config import get_age_offset
+@@ -309,7 +312,7 @@
+         mask = self.get_segmentation_mask(image_tensor)
+         h, w = image_tensor.shape[:2]
+         area_face = np.pi * (w * 0.36) * (h * 0.44)
+-        spot_percentage = float((np.sum(mask) / (area_face + 1e-6)) * 100.0)
++        spot_percentage = spot_area_percentage(mask)
+ 
+         # Structured logging without PHI (replaces print)
+         latency_ms = (time.perf_counter() - start_time) * 1000
+@@ -337,7 +340,7 @@
+         input_chw = np.transpose(img_float, (2, 0, 1))[np.newaxis, ...]
+         input_name = self._spot_session.get_inputs()[0].name
+         outputs = self._spot_session.run(None, {input_name: input_chw})
+-        return np.squeeze(outputs[0]).astype(np.float64)
++        return validate_probability(np.squeeze(outputs[0]).astype(np.float64))
+ 
+     def get_segmentation_mask(
+         self, image_tensor: np.ndarray, phototype: Optional[int] = None

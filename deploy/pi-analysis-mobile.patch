@@ -1,0 +1,108 @@
+--- a/src/mobile/server.py
++++ b/src/mobile/server.py
+@@ -25,7 +25,25 @@
+         self._diagnostic_key = None
+         self._preview = None
+         self._preview_at = 0.0
++        self._analysis_preview = None
++        self._new_person = False
+         self._touch = None
++
++    def publish_analysis_preview(self, rgb, mask, region, analysis_id):
++        from src.inference.region_analysis import encode_zone_preview
++        jpeg = encode_zone_preview(rgb, mask, region)
++        with self._lock:
++            self._analysis_preview = (analysis_id, jpeg)
++
++    def analysis_preview(self, analysis_id):
++        with self._lock:
++            if (self._state != 'DIAGNOSTICADO' or self._pending is not None
++                    or time.monotonic() - self._heartbeat >= 10
++                    or not self._diagnostic or not self._analysis_preview
++                    or self._diagnostic['analysis_id'] != analysis_id
++                    or self._analysis_preview[0] != analysis_id):
++                raise HTTPException(409, 'La lectura ya no está disponible.')
++            return self._analysis_preview[1]
+ 
+     def publish_preview(self, frame, selector=None):
+         """Espejo cuadrado en RAM, con coordenadas del mismo fotograma."""
+@@ -67,6 +85,7 @@
+             if state != "DIAGNOSTICADO" or result is None:
+                 self._diagnostic = None
+                 self._diagnostic_key = None
++                self._analysis_preview = None
+             elif key != self._diagnostic_key:
+                 self._diagnostic = project_diagnostic(result, session_id, samples)
+                 self._diagnostic_key = key
+@@ -79,9 +98,12 @@
+                         diagnostic=deepcopy(self._diagnostic) if connected and self._state == "DIAGNOSTICADO" and self._pending is None else None)
+             if self._touch is not None and connected:
+                 result["touch"] = deepcopy(self._touch)
++            if result['diagnostic'] is not None:
++                result['diagnostic']['zone_preview_available'] = bool(
++                    self._analysis_preview and self._analysis_preview[0] == self._diagnostic['analysis_id'])
+             return result
+ 
+-    def request_restart(self, revision):
++    def request_restart(self, revision, new_person=False):
+         with self._lock:
+             if self._state == "DESCONECTADO" or time.monotonic() - self._heartbeat >= 10:
+                 raise HTTPException(503, "La cámara no está disponible.")
+@@ -90,16 +112,24 @@
+             if self._state == "ANALIZANDO":
+                 raise HTTPException(409, "Espera a que termine el análisis.")
+             self._pending = time.monotonic()
+-
+-    def apply_pending(self, restart):
+-        # Solo el hilo de la cámara modifica el escaneo. El acuse llega después.
++            self._new_person = new_person
++            self._analysis_preview = None
++
++    def apply_pending(self, restart, new_person=None):
+         with self._lock:
+             if self._pending is None:
+                 return
+             queued_at = self._pending
+             self._pending = None
+             if time.monotonic() - queued_at < 10:
+-                restart()
++                if self._new_person:
++                    if new_person is None:
++                        raise RuntimeError('La cámara debe proporcionar el cambio de persona')
++                    new_person()
++                else:
++                    restart()
++                self._new_person = False
++                self._touch = None
+                 self._state = "BUSCANDO"
+                 self._applied_revision = self._revision
+                 self._revision += 1
+@@ -117,11 +147,13 @@
+             self._diagnostic = None
+             self._diagnostic_key = None
+             self._preview = None
++            self._analysis_preview = None
+             self._touch = None
+ 
+ 
+ class RestartRequest(BaseModel):
+     revision: int = Field(ge=0)
++    new_person: bool = False
+ 
+ 
+ def create_mobile_app(control, token):
+@@ -171,9 +203,13 @@
+     def mirror_status():
+         return control.snapshot()
+ 
++    @app.get('/mirror/api/analysis-frame', dependencies=[Depends(local_display)])
++    def mirror_analysis_frame(analysis_id: str):
++        return Response(control.analysis_preview(analysis_id), media_type='image/jpeg')
++
+     @app.post('/mirror/api/restart', status_code=202, dependencies=[Depends(local_display)])
+     def mirror_restart(body: RestartRequest):
+-        control.request_restart(body.revision)
++        control.request_restart(body.revision, body.new_person)
+         return {'accepted': True}
+ 
+     @app.get("/", include_in_schema=False)

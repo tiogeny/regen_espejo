@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#323823">
+  <title>REGEN · Tu espejo personal</title>
+  <link rel="stylesheet" href="/mirror.css">
+  <script src="/mirror.js" defer></script>
+</head>
+<body>
+  <svg class="symbols" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <symbol id="leaf" viewBox="0 0 48 64"><path d="M25 60C8 44 8 24 34 5c2 18-1 29-20 32M15 47c12-14 18-24 19-35M26 37c15-5 21 3 16 14-9-1-14-7-16-14Z"/></symbol>
+      <symbol id="drop" viewBox="0 0 32 36"><path d="M16 3C13 11 5 18 5 24a11 11 0 0 0 22 0C27 18 19 11 16 3Z"/><path d="M10 24c0 4 3 6 6 6m0-17c-1 4-5 7-5 10"/></symbol>
+      <symbol id="waves" viewBox="0 0 32 36"><path d="M3 13c5 0 4-6 9-6s4 6 9 6h8M3 20c5 0 4-6 9-6s4 6 9 6h8M3 27c5 0 4-6 9-6s4 6 9 6h8"/></symbol>
+      <symbol id="arrow" viewBox="0 0 32 32"><path d="M7 16h18m-8-8 8 8-8 8"/></symbol>
+    </defs>
+  </svg>
+  <main class="mirror" aria-label="Espejo REGEN con análisis de piel">
+    <header class="topbar">
+      <a class="brand" href="/mirror" aria-label="REGEN inicio"><svg><use href="#leaf"/></svg><span>REGEN</span></a>
+      <p class="header-caption">Tu espejo personal</p>
+      <span id="connection-status" class="connection-status" role="status">Conectando cámara</span>
+    </header>
+    <section class="camera-stage" aria-label="Espejo en vivo">
+      <canvas id="camera" width="720" height="720" aria-label="Imagen de la cámara reflejada como un espejo"></canvas>
+      <div class="glass" aria-hidden="true"></div>
+      <div class="inner-ring" aria-hidden="true"></div>
+      <div id="camera-empty" class="camera-empty"><svg><use href="#leaf"/></svg><p>Tu piel, de cerca.</p><span id="camera-message">Esperando cámara…</span></div>
+      <span class="mirror-caption">Señala una zona para conocer tu piel</span>
+    </section>
+    <aside class="left-panel" aria-label="Mediciones y zona seleccionada">
+    <section class="skin" aria-label="Zona de piel seleccionada">
+      <div class="skin-closeup"><canvas id="closeup" width="224" height="224" aria-label="Ampliación de la zona señalada"></canvas><span id="closeup-empty">Señala<br>tu piel</span></div>
+      <div class="skin-title"><h1>Tu piel</h1><p id="skin-type">Sin evaluar</p></div>
+    </section>
+    <section class="measurements" aria-label="Indicadores de la piel">
+      <div class="measurement-tabs" role="group" aria-label="Fuente de los indicadores"><button id="visual-mode" aria-pressed="true">Cámara</button><button id="appearance-mode" aria-pressed="false">Análisis visual</button></div>
+      <div class="measurement"><svg><use href="#drop"/></svg><div><span id="metric-label-1">Área segmentada</span><div class="track"><span id="metric-fill-1"></span></div></div><output id="metric-value-1">—</output></div>
+      <div class="measurement"><svg><use href="#waves"/></svg><div><span id="metric-label-2">Edad estimada</span><div class="track"><span id="metric-fill-2"></span></div></div><output id="metric-value-2">—</output></div>
+      <div class="measurement"><svg><use href="#drop"/></svg><div><span id="metric-label-3">Fototipo estimado</span><div class="track green"><span id="metric-fill-3"></span></div></div><output id="metric-value-3">—</output></div>
+      <p id="measurement-note" class="measurement-note">Estimaciones de la cámara</p>
+      <button id="show-reading" class="down" aria-label="Ver lectura de la zona" aria-expanded="false"><span>Ver mediciones</span><svg viewBox="0 0 24 24"><path d="m5 8 7 7 7-7"/></svg></button>
+    </section>
+    </aside>
+    <section class="product" aria-labelledby="product-title">
+      <span class="eyebrow">Resumen de la lectura</span>
+      <h2 id="product-title">Lectura de tu piel</h2>
+      <p id="product-subtitle">Señala una zona para comenzar</p>
+      <div class="formula">
+        <div class="donut" role="img" aria-label="Esperando el análisis de área segmentada"><svg viewBox="0 0 120 120" class="donut-chart"><circle id="area-segment" class="segment s1" cx="60" cy="60" r="48"/><circle id="rest-segment" class="segment s2" cx="60" cy="60" r="48"/></svg><svg class="donut-leaf"><use href="#leaf"/></svg></div>
+        <ul id="ingredients" aria-label="Resultados de la lectura"><li><i class="swatch aguaje"></i>Segmentado<span id="area-summary">—</span></li><li><i class="swatch sacha"></i>Resto de zona<span id="rest-summary">—</span></li><li><i class="swatch camu"></i>Rostro<span id="global-summary">—</span></li><li><i class="swatch huito"></i>Captura<span id="quality-summary">—</span></li></ul>
+      </div>
+      <p id="formula-note" class="formula-note">Sin una lectura todavía</p>
+      <button id="expand-result" class="result-link">Ver análisis completo</button>
+      <button id="show-product" class="round-button" aria-label="Ver recomendaciones"><span>Recomendaciones</span><svg><use href="#arrow"/></svg></button>
+    </section>
+    <nav class="pages" aria-label="Secciones del espejo"><button class="active" aria-label="Vista del espejo" id="mirror-page">Espejo</button><button aria-label="Lectura de piel" id="reading-page">Lectura</button><button aria-label="Recomendaciones" id="product-page">Cuestionario</button></nav>
+    <div class="scan-status"><p id="instruction" role="status" aria-live="polite">Señala una zona del rostro con el índice.</p><progress id="scan-progress" value="0" max="1" aria-label="Progreso de selección"></progress><div class="scan-actions"><button id="restart" disabled>Repetir zona</button><button id="new-person" disabled>Nueva persona</button></div></div>
+    <section id="detail" class="detail" hidden aria-labelledby="detail-title">
+      <button id="close-detail" class="close" aria-label="Cerrar detalles">×</button><span class="eyebrow">Tu espejo personal</span><h2 id="detail-title">Lectura de tu piel</h2>
+      <div id="reading-detail"><p id="reading-state">Señala una zona y retira la mano para analizarla.</p><dl><div><dt>Área segmentada en zona</dt><dd id="spots">—</dd></div><div><dt>Área segmentada en rostro</dt><dd id="global-spots">—</dd></div><div><dt>Edad estimada</dt><dd id="age">—</dd></div><div><dt>Fototipo estimado</dt><dd id="phototype">—</dd></div></dl><p id="reading-quality" class="detail-note"></p><p class="detail-note">Dorado: áreas marcadas por el modelo en la captura analizada. El área segmentada no establece un diagnóstico ni determina la severidad de una lesión.</p></div>
+      <section id="appearance-detail" hidden aria-labelledby="appearance-title">
+        <h3 id="appearance-title">Análisis visual experimental</h3>
+        <p id="appearance-state"></p>
+        <dl><div><dt>Brillo visible</dt><dd id="shine-detail">—</dd></div><div><dt>Textura visible</dt><dd id="texture-detail">—</dd></div><div><dt>Señales de sequedad</dt><dd id="dryness-detail">—</dd></div></dl>
+        <p class="detail-note">Los porcentajes indican qué parte de la zona contiene patrones visuales. El brillo puede provenir de luz, sudor o cremas; la textura incluye contrastes superficiales. Las señales de sequedad son posibles fragmentos claros: pueden confundirse con vello, producto o ruido y no confirman piel seca. No se miden hidratación, sebo ni pH.</p>
+      </section>
+      <div id="product-detail" hidden>
+        <p id="product-state" role="status" aria-live="polite">Completa el cuestionario después del análisis.</p>
+        <p class="detail-note">Las recomendaciones se evalúan con el área segmentada del rostro completo y tu edad declarada. No se deducen tratamientos de la zona señalada ni se calculan proporciones de jabón.</p>
+        <button id="open-questionnaire" class="recommendation-action" disabled>Completar cuestionario</button>
+        <p id="recommendation-error" role="alert" hidden></p>
+        <p id="recommendation-context" class="detail-note" hidden></p>
+        <div id="recommendations"></div>
+      </div>
+    </section>
+  </main>
+  <dialog id="questionnaire-dialog" aria-labelledby="questionnaire-title">
+    <form id="questionnaire-form" autocomplete="off">
+      <div class="questionnaire-header"><h2 id="questionnaire-title">Antes de recomendarte</h2><button id="close-questionnaire" type="button" aria-label="Cerrar cuestionario">×</button></div>
+      <p>Análisis para varones y mujeres. Selecciona tus respuestas para evaluar opciones del catálogo. Si no conoces una respuesta, elige «No lo sé».</p>
+      <p class="detail-note">Las respuestas se usan para esta lectura; no se guardan en el dispositivo.</p>
+      <label class="question">Sexo<select name="sex" required><option value="">Selecciona</option><option value="male">Masculino</option><option value="female">Femenino</option></select></label>
+      <label class="question">Tu edad real<select name="age" required><option value="">Selecciona tu edad</option></select></label>
+      <div id="health-questions"></div>
+      <label class="question">¿Tienes otras alergias conocidas?<select name="known_allergies_mode" required><option value="">Selecciona</option><option value="none">No tengo</option><option value="review">Sí, necesito revisión</option><option value="unknown">No lo sé</option></select></label>
+      <label class="question">¿Usas actualmente algún tratamiento para la piel?<select name="current_treatments_mode" required><option value="">Selecciona</option><option value="none">No</option><option value="review">Sí, necesito revisión</option><option value="unknown">No lo sé</option></select></label>
+      <p class="detail-note">Si tienes alergias o usas tratamientos, se requiere revisión profesional antes de recomendar productos.</p>
+      <p id="questionnaire-error" role="alert" hidden></p>
+      <div class="questionnaire-actions"><button type="button" id="cancel-questionnaire">Cancelar</button><button type="submit" id="submit-questionnaire">Evaluar recomendaciones</button></div>
+    </form>
+  </dialog>
+  <dialog id="new-person-confirm" aria-labelledby="new-person-title"><form method="dialog"><h2 id="new-person-title">¿Comenzar con otra persona?</h2><p>Se cerrará la sesión actual y se retirarán sus resultados del espejo.</p><button value="cancel" autofocus>Cancelar</button><button value="confirm">Nueva persona</button></form></dialog>
+</body>
+</html>

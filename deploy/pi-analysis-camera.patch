@@ -1,0 +1,106 @@
+--- a/demo_camara.py
++++ b/demo_camara.py
+@@ -47,6 +47,7 @@
+ from mediapipe.tasks import python as mp_python
+ from mediapipe.tasks.python import vision
+ 
++from src.inference.region_analysis import CaptureRejected, capture_quality
+ from src.inference.face_touch import FaceTouchSelector
+ from src.inference.segmentation import localized_spot_percentage
+ from src.mobile.server import ScanControl, start_mobile_server
+@@ -386,6 +387,7 @@
+     def restart_scan(self):
+         """Repite la captura conservando la sesión y sus lecturas previas."""
+         self.state = "BUSCANDO"
++        self.touch_error_until = 0
+         if self.touch_mode:
+             self.touch_selector.reset()
+             self.selected_region = None
+@@ -398,8 +400,23 @@
+         self.toast_message = "Escaneo reiniciado"
+         self.toast_until = time.time() + 2.5
+ 
++    def start_new_person(self):
++        previous = self.session_id
++        self.finalize_session_and_restart()
++        if self.session_id == previous:
++            self.session_idx += 1
++            self.session_id = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{self.session_idx:02d}"
++        self.session_ages = []
++        self.session_csv_path = None
++        self.patient_sensitive_skin = False
++        self.patient_is_pregnant = False
++        self.restart_scan()
++
+     def process_touch_frame(self, frame, detection_result, now):
+         """Detectar dedo a un máximo de 8 Hz; captura solo tras retirar la mano."""
++        if now < getattr(self, 'touch_error_until', 0):
++            self.mobile_control.publish_touch('ERROR', self.toast_message)
++            return None
+         if self.state == "DIAGNOSTICADO":
+             # La selección acompaña al rostro también después de la lectura.
+             if len(detection_result.face_landmarks) == 1 and self.touch_selector.anchor is not None:
+@@ -453,13 +470,14 @@
+                 self.last_result = result
+                 self.state = "DIAGNOSTICADO"
+                 self.last_diagnosis_time = time.time()
+-            except Exception:
++            except Exception as exc:
+                 self.touch_selector.reset()
+                 self.selected_region = None
+                 self.last_result = None
+                 self.state = "BUSCANDO"
+-                self.toast_message = "No se pudo medir la zona. Revisa modelos y encuadre."
++                self.toast_message = str(exc) if isinstance(exc, CaptureRejected) else "No se pudo analizar la zona. Vuelve a señalar dentro de la mejilla."
+                 self.toast_until = time.time() + 5
++                self.touch_error_until = time.monotonic() + 4
+                 self.mobile_control.publish_touch("ERROR", self.toast_message)
+             finally:
+                 self.analyzing = False
+@@ -481,6 +499,9 @@
+         if face_box is not None:
+             self.last_face_box = face_box
+ 
++        quality_rgb = cv2.resize(cv2.cvtColor(primary_roi, cv2.COLOR_BGR2RGB), (224, 224), interpolation=cv2.INTER_AREA)
++        quality = capture_quality(quality_rgb, self.selected_region)
++
+         # Multi-muestra + mediana temporal
+         ages_list, spots_list = [], []
+         for f in frames_to_eval:
+@@ -506,8 +527,8 @@
+             phototype_res = extract_skin_phototype_multisample(cheek_patches)
+         except Exception as exc:
+             log.warning("Error fototipo multi-muestra: %s", exc)
+-            phototype_res = {"phototype": 4, "description": "Bronceada/Morena",
+-                             "clinical_label": "Fototipo IV", "ita": 22.0, "spot_threshold": 0.20}
++            phototype_res = {"phototype": None, "description": "No disponible",
++                             "clinical_label": "No disponible", "ita": None}
+         self.last_phototype_info = phototype_res
+ 
+         # Óptica (gafas / glare)
+@@ -565,6 +586,7 @@
+ 
+             if response.status_code == 201:
+                 res_data = response.json()
++                res_data['datos']['capture_quality'] = quality
+                 res_data["metadatos"]["total_call_ms"] = round(total_call_ms, 2)
+                 res_data["datos"]["clinica"]["edad_biologica_estimada"]     = final_age
+                 res_data["datos"]["clinica"]["porcentaje_hiperpigmentacion"] = final_spots
+@@ -577,6 +599,8 @@
+                     clinical['zona_seleccionada'] = dict(self.selected_region)
+                     clinical['porcentaje_hiperpigmentacion_zona'] = localized_spot_percentage(
+                         self.last_mask, **self.selected_region)
++                    self.mobile_control.publish_analysis_preview(
++                        roi_224, self.last_mask, self.selected_region, res_data['datos']['sesion_id'])
+                     # Global face prescriptions do not apply to a selected circle.
+                     res_data['datos']['prescripciones'] = []
+                     res_data['datos']['orientacion'] = {
+@@ -682,7 +706,7 @@
+                     log.warning("Error al leer fotograma")
+                     break
+ 
+-                self.mobile_control.apply_pending(self.restart_scan)
++                self.mobile_control.apply_pending(self.restart_scan, self.start_new_person)
+                 self.mobile_control.publish(
+                     self.state, len(self.session_ages), self.last_result, self.session_id
+                 )

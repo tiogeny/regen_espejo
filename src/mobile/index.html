@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#252b1b"><title>Derma · Consulta móvil</title>
+<link rel="stylesheet" href="/mobile.css"><script src="/mobile.js" defer></script>
+</head>
+<body>
+<header><a class="brand" href="/" aria-label="Derma inicio"><span class="brand-icon" aria-hidden="true"><svg viewBox="0 0 40 48" fill="none"><path d="M21 44C9 30 8 15 30 4c3 14-1 24-16 25M12 35c8-8 13-15 15-23M23 30c12-2 15 5 13 12-9 0-13-5-13-12Z" stroke="currentColor" stroke-width="1.2"/></svg></span>derma<span class="brand-dot"> / </span><small>consulta móvil</small></a><span class="private">Sin internet</span></header>
+<main>
+<div class="eyebrow">Cuidado que empieza en tu piel</div>
+<h1 id="page-title">Tu piel,<br>de cerca.</h1><p class="intro" id="intro">Señala una zona de tu rostro frente al espejo. Revisa aquí la lectura de tu piel.</p>
+<section id="pairing" class="card">
+  <span class="step">Tu espejo personal</span><h2>Conecta con tu cámara</h2>
+  <p>Introduce la contraseña para acceder al equipo.</p>
+  
+  <form id="pair-form">
+    <label for="password">Contraseña de acceso</label>
+    <div class="input-wrap">
+      <input id="password" type="password" required autocomplete="off" autocapitalize="none" spellcheck="false" inputmode="numeric" maxlength="16" placeholder="Contraseña">
+      <button type="button" id="show-password" aria-label="Mostrar contraseña" aria-pressed="false">Ver</button>
+    </div>
+    <button id="connect" class="primary" type="submit">Conectar con el espejo</button>
+  </form>
+  <p class="hint">Conecta el celular a la misma red Wi-Fi del equipo. Acceso: <strong>1234</strong>.</p>
+  <details class="qr-details"><summary>Conectar otro celular con QR</summary>  <div class="qr-wrapper">
+    <img id="qr-image" src="/pairing/qr.png" alt="Código QR para conectar al equipo" loading="lazy" />
+    <p class="qr-hint">Escanea el QR para abrir con acceso directo</p>
+  </div>
+
+</details>
+  <p id="pair-message" role="status" aria-live="polite"></p>
+</section>
+<section id="dashboard" hidden>
+  <div class="connection"><span id="connection">Conectando…</span><button id="logout" class="text-button">Cerrar consulta</button></div>
+  <div class="card scan-card" id="scan-card">
+    <div class="card-top"><span class="step">Tu espejo</span><span class="pill" id="reading-count">0 lecturas</span></div>
+    <div class="scanner" aria-label="Guía ilustrada de señalamiento; no es una fotografía">
+      <div class="mirror-wordmark" aria-hidden="true">derma</div>
+      <svg class="face-guide" viewBox="0 0 224 224" aria-hidden="true" fill="none">
+        <path d="M68 178c-13 9-25 14-36 17m124-17c13 9 25 14 36 17M88 160v20c12 10 36 10 48 0v-20M56 86c-6-55 112-74 113 4M62 85c10-3 24-12 34-27 14 14 35 21 66 26v30c-1 28-25 55-50 56-25-1-49-28-50-56V85Z"/>
+        <path d="M77 101c6-4 14-4 20 0m30 0c6-4 14-4 20 0m-36 4-5 24 10 1m-17 16c8 4 16 4 24 0"/>
+        <circle class="guide-target" cx="143" cy="122" r="12"/><circle class="guide-target" cx="143" cy="122" r="17"/>
+        <path class="guide-hand" d="m145 131 5 41m-5-41c-1-8-10-8-9 1l1 24-8-11c-6-7-12-2-8 5l18 34c4 7 16 12 27 6 11-6 12-14 9-23l-5-16c-3-6-10-4-9 2l-4-10c-3-6-10-3-8 4"/>
+      </svg>
+      <p class="mirror-caption" id="touch-instruction">Señala con el índice. Después, retira la mano.</p>
+    </div>
+    <div class="status-line"><span id="dot" class="dot"></span><h2 id="state">Consultando equipo</h2></div>
+    <p id="guidance">Obteniendo el estado de la cámara…</p>
+    <div class="scan-footer"><span id="sync">Actualizando…</span><button id="refresh" class="text-button">Actualizar</button></div>
+  </div>
+  <p id="message" role="status" aria-live="polite"></p>
+  <section id="diagnostic" aria-labelledby="diagnostic-title" hidden>
+    <div class="section-heading"><div><span class="step">Tu lectura</span><h2 id="diagnostic-title">Lectura de tu piel</h2></div><span class="result-check" aria-hidden="true">✓</span></div>
+    <p class="result-meta" id="result-meta"></p>
+    <div class="card finding"><div class="card-top"><span class="step" id="measurement-title">Área segmentada del rostro</span><span id="severity" class="severity">No disponible</span></div><div class="spot-value"><strong id="spots">—</strong><span id="measurement-unit">del área facial evaluada</span></div><div class="measurement-track" aria-hidden="true"><span id="measurement-fill"></span></div><p id="measurement-note">Estimación del modelo para revisión profesional.</p></div>
+    <p class="hint" id="global-context" hidden></p><div class="result-grid"><div class="card metric"><span class="metric-label">Edad biológica estimada</span><div><strong id="age">—</strong><span id="age-unit"> años</span></div><p>Estimación del escaneo</p></div><div class="card metric"><span class="metric-label">Fototipo Fitzpatrick</span><div><strong id="phototype">—</strong></div><p id="phototype-label">No disponible</p></div></div>
+    <div class="clinical-note">Resultado automatizado para revisión del dermatólogo.</div>
+    <section class="card" id="questionnaire-card" aria-labelledby="questionnaire-title">
+      <span class="step">Tu perfil</span>
+      <h3 id="questionnaire-title">Antes de recomendar</h3>
+      <p class="questionnaire-intro">Completa estas preguntas con la persona evaluada. Responde de nuevo en cada lectura.</p>
+      <form id="questionnaire-form" autocomplete="off">
+        <label>Edad declarada (años)<input name="age" type="number" min="0" max="120" required></label>
+        <div id="questionnaire-flags"></div>
+        <label>Alergias conocidas<small>Separa con comas si hay más de una.</small><input name="known_allergies" placeholder="Deja vacío si no tiene"></label>
+        <label>Tratamientos actuales<small>Incluye productos y medicamentos que utiliza.</small><input name="current_treatments" placeholder="Deja vacío si no utiliza"></label>
+        <p>Al enviar, confirmas que las listas vacías significan que no hay alergias ni tratamientos conocidos.</p>
+        <button class="primary" type="submit">Evaluar recomendaciones</button>
+        <p id="questionnaire-message" role="status"></p>
+      </form>
+    </section>
+    <section class="card recommendations" aria-labelledby="recommendations-title"><span class="step">Cuidado de tu piel</span><h3 id="recommendations-title">Recomendaciones generadas</h3><p id="indication" hidden></p><p class="hint">Revisa las precauciones y el contexto clínico antes de indicar un tratamiento.</p><p id="orientation-message" role="status"></p><div id="prescriptions"></div><p id="no-prescriptions" hidden>No hay recomendaciones disponibles para esta lectura.</p></section>
+    <details class="card technical"><summary>Detalles de la lectura</summary><dl><div><dt>Sesión actual</dt><dd id="session-id">—</dd></div><div><dt>Identificador de análisis</dt><dd id="analysis-id">—</dd></div><div><dt>Grupo etario</dt><dd id="age-group">—</dd></div><div><dt>Ángulo ITA</dt><dd id="ita">—</dd></div><div><dt>Detección de gafas</dt><dd id="glasses">—</dd></div></dl></details>
+  </section>
+  <details class="card help"><summary>Preparar la siguiente lectura</summary><ol><li>Coloca a la persona frente a la cámara.</li><li>Asegura una iluminación uniforme del rostro.</li><li>Pide que mantenga la posición hasta finalizar.</li></ol></details>
+  <div class="action"><button id="restart" class="primary" disabled>↻ Reiniciar escaneo</button><p>Misma persona · Conserva las lecturas de la sesión</p></div>
+  
+  <details class="card danger-card">
+    <summary id="power-title">Administrar equipo</summary>
+    <p class="hint">Acciones del sistema. Requieren confirmación explícita por seguridad.</p>
+    <div class="power-actions">
+      <button id="reboot-btn" class="secondary">⟳ Reiniciar equipo</button>
+      <button id="shutdown-btn" class="danger">⏻ Apagar equipo</button>
+    </div>
+  </details>
+</section>
+<footer>Consulta local · Sin fotografías en el celular<br>Los resultados se ocultan al cerrar la consulta.</footer>
+</main>
+<dialog id="confirm" aria-labelledby="confirm-title"><form method="dialog"><span class="step">REPETIR LECTURA</span><h2 id="confirm-title">¿Reiniciar el escaneo?</h2><p>El resultado actual dejará de mostrarse en el celular. La cámara buscará el rostro para una nueva captura de la misma persona.</p><p class="hint">Las lecturas anteriores se conservan en la sesión del equipo.</p><button class="primary" value="restart">Sí, reiniciar escaneo</button><button class="secondary" value="cancel" autofocus>Volver al resultado</button></form></dialog>
+<dialog id="confirm-power" aria-labelledby="confirm-power-title">
+  <form method="dialog">
+    <span class="step">ACCIÓN DEL SISTEMA</span>
+    <h2 id="confirm-power-title">Confirmar acción</h2>
+    <p id="confirm-power-text"></p>
+    <p class="hint">Esta acción requiere confirmación explícita.</p>
+    <button id="confirm-power-action" class="danger" value="confirm">Confirmar</button>
+    <button class="secondary" value="cancel" autofocus>Cancelar</button>
+  </form>
+</dialog>
+</body></html>

@@ -1,0 +1,133 @@
+--- a/src/mobile/server.py
++++ b/src/mobile/server.py
+@@ -1,4 +1,5 @@
+ """Servidor independiente del API de inferencia, dentro del proceso de cámara."""
++import os
+ import secrets
+ from copy import deepcopy
+ from src.mobile.diagnostic import project_diagnostic
+@@ -6,8 +7,8 @@
+ import time
+ from pathlib import Path
+ 
+-from fastapi import Depends, FastAPI, Header, HTTPException
+-from fastapi.responses import FileResponse
++from fastapi import Depends, FastAPI, Header, HTTPException, Request
++from fastapi.responses import FileResponse, Response
+ from pydantic import BaseModel, Field
+ 
+ 
+@@ -22,6 +23,40 @@
+         self._samples = 0
+         self._diagnostic = None
+         self._diagnostic_key = None
++        self._preview = None
++        self._preview_at = 0.0
++        self._touch = None
++
++    def publish_preview(self, frame, selector=None):
++        """Espejo cuadrado en RAM, con coordenadas del mismo fotograma."""
++        if time.monotonic() - self._preview_at < .125:
++            return
++        import cv2
++        h, w = frame.shape[:2]
++        side = min(h, w)
++        left, top = (w - side) // 2, (h - side) // 2
++        image = cv2.resize(frame[top:top + side, left:left + side], (720, 720))
++        ok, jpeg = cv2.imencode('.jpg', image, [cv2.IMWRITE_JPEG_QUALITY, 82])
++        if not ok:
++            return
++        headers = {}
++        if selector is not None and selector.point is not None:
++            headers = {'X-Zone-X': str((float(selector.point[0]) - left) / side),
++                       'X-Zone-Y': str((float(selector.point[1]) - top) / side),
++                       'X-Zone-Radius': str(float(selector.radius) / side)}
++        with self._lock:
++            self._preview = (jpeg.tobytes(), headers)
++            self._preview_at = time.monotonic()
++
++    def preview(self):
++        with self._lock:
++            if self._preview is None or time.monotonic() - self._preview_at > 3:
++                raise HTTPException(503, 'Esperando cámara')
++            return self._preview
++
++    def publish_touch(self, state, message, progress=0.0):
++        with self._lock:
++            self._touch = dict(state=state, message=message, progress=progress)
+ 
+     def publish(self, state, samples, result=None, session_id=None):
+         with self._lock:
+@@ -39,9 +74,12 @@
+     def snapshot(self):
+         with self._lock:
+             connected = self._state != "DESCONECTADO" and time.monotonic() - self._heartbeat < 10
+-            return dict(connected=connected, state=self._state if connected else "DESCONECTADO",
++            result = dict(connected=connected, state=self._state if connected else "DESCONECTADO",
+                         samples=self._samples, revision=self._revision, applied_revision=self._applied_revision, pending=self._pending is not None,
+                         diagnostic=deepcopy(self._diagnostic) if connected and self._state == "DIAGNOSTICADO" and self._pending is None else None)
++            if self._touch is not None and connected:
++                result["touch"] = deepcopy(self._touch)
++            return result
+ 
+     def request_restart(self, revision):
+         with self._lock:
+@@ -78,6 +116,8 @@
+             self._pending = None
+             self._diagnostic = None
+             self._diagnostic_key = None
++            self._preview = None
++            self._touch = None
+ 
+ 
+ class RestartRequest(BaseModel):
+@@ -100,9 +140,47 @@
+         if not secrets.compare_digest(authorization, f"Bearer {token}"):
+             raise HTTPException(401, "Código de acceso incorrecto o vencido.")
+ 
++    def local_display(request: Request):
++        # Las imágenes quedan disponibles solo para el navegador del equipo.
++        if request.client is None or request.client.host not in ('127.0.0.1', '::1'):
++            raise HTTPException(403, 'El espejo está disponible solo en este equipo.')
++        if request.url.hostname not in ('127.0.0.1', '::1', 'localhost'):
++            raise HTTPException(403, 'Dirección local inválida.')
++        origin = request.headers.get('origin')
++        if origin and origin != str(request.base_url).rstrip('/'):
++            raise HTTPException(403, 'Origen inválido.')
++
++    @app.get('/mirror', include_in_schema=False)
++    def mirror():
++        return FileResponse(Path(__file__).with_name('mirror.html'))
++
++    @app.get('/mirror.css', include_in_schema=False)
++    def mirror_style():
++        return FileResponse(Path(__file__).with_name('mirror.css'), media_type='text/css')
++
++    @app.get('/mirror.js', include_in_schema=False)
++    def mirror_script():
++        return FileResponse(Path(__file__).with_name('mirror.js'), media_type='text/javascript')
++
++    @app.get('/mirror/api/frame', dependencies=[Depends(local_display)])
++    def mirror_frame():
++        jpeg, headers = control.preview()
++        return Response(jpeg, media_type='image/jpeg', headers=headers)
++
++    @app.get('/mirror/api/status', dependencies=[Depends(local_display)])
++    def mirror_status():
++        return control.snapshot()
++
++    @app.post('/mirror/api/restart', status_code=202, dependencies=[Depends(local_display)])
++    def mirror_restart(body: RestartRequest):
++        control.request_restart(body.revision)
++        return {'accepted': True}
++
+     @app.get("/", include_in_schema=False)
+-    def index():
+-        return FileResponse(Path(__file__).with_name("index.html"))
++    def index(request: Request):
++        local = request.client is not None and request.client.host in ('127.0.0.1', '::1')
++        page = 'mirror.html' if local and os.getenv('DERMA_WEB', '0') == '1' else 'index.html'
++        return FileResponse(Path(__file__).with_name(page))
+ 
+     @app.get("/mobile.js", include_in_schema=False)
+     def script():

@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=REGEN Espejo
+Comment=Abre el espejo local a pantalla completa
+Exec=/bin/bash /opt/derma-onedge/deploy/launch-regen-kiosk.sh
+Terminal=false
