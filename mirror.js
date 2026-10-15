@@ -1,4 +1,4 @@
-// REGEN · Espejo Inteligente de Diagnóstico Dermatoscópico (Client-Side Web v2.5)
+// REGEN · Espejo Inteligente de Diagnóstico Dermatoscópico (Client-Side Web v2.6)
 
 // Redirigir automáticamente a HTTPS si se entra por HTTP (la webcam requiere HTTPS)
 if (location.protocol === 'http:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
@@ -27,6 +27,8 @@ let handsReady = false;
 let isProcessingHands = false;
 let lastHandsProcessTime = 0;
 let clearStartTime = null;
+let ageSession = null;
+let isAgeSessionLoading = false;
 
 // Catálogo farmacognóstico determinista de Ronal
 const BOTANICAL_CATALOG = {
@@ -115,6 +117,7 @@ async function initCamera() {
     $('instruction').textContent = 'Ponte frente al espejo. Señala tu mejilla con el dedo o toca la pantalla.';
 
     initMediaPipeHands();
+    initONNXModels();
     requestAnimationFrame(renderLoop);
   } catch (err) {
     statusEl.textContent = 'Permiso pendiente';
@@ -152,6 +155,27 @@ function initMediaPipeHands() {
     }
   } else {
     setTimeout(initMediaPipeHands, 300);
+  }
+}
+
+// 2b. Inicialización de Red Neuronal ONNX MobileNetV3 (SPEC-001 de Ronal)
+async function initONNXModels() {
+  if (typeof window.ort !== 'undefined' && !ageSession && !isAgeSessionLoading) {
+    isAgeSessionLoading = true;
+    try {
+      ort.env.wasm.numThreads = 1;
+      ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.3/dist/';
+      ageSession = await ort.InferenceSession.create('./models/age_estimator.onnx', {
+        executionProviders: ['wasm']
+      });
+      console.log('[REGEN] Red Neuronal MobileNetV3 de Edad cargada exitosamente.');
+    } catch (e) {
+      console.warn('[REGEN] Fallback a motor fotométrico dinámico:', e);
+    } finally {
+      isAgeSessionLoading = false;
+    }
+  } else if (!ageSession && !isAgeSessionLoading) {
+    setTimeout(initONNXModels, 500);
   }
 }
 
@@ -501,13 +525,13 @@ function triggerAnalysisAtPoint(screenX, screenY, label = 'Mejilla derecha') {
 
   targetZone = { x: screenX, y: screenY, radius: 28, label };
 
-  setTimeout(() => {
-    performCalibratedDermatologicalAnalysis(targetZone);
+  setTimeout(async () => {
+    await performCalibratedDermatologicalAnalysis(targetZone);
   }, 1000); // 1 segundo de barrido láser escaneando
 }
 
-// 6. Motor Dermatológico Calibrado (Edad Realista y Fototipo Correcto)
-function performCalibratedDermatologicalAnalysis(zone) {
+// 6. Motor Dermatológico Calibrado (Red Neuronal ONNX + Motor Fotométrico Dinámico)
+async function performCalibratedDermatologicalAnalysis(zone) {
   const cropSize = 224;
   const tempCanvas = document.createElement('canvas');
   tempCanvas.width = cropSize;
@@ -552,16 +576,15 @@ function performCalibratedDermatologicalAnalysis(zone) {
   const avgB = Math.max(0.1, totalB / totalPixels);
 
   // 1. Fototipo Fitzpatrick Calibrado (Ángulo ITA)
-  // Para pieles mestizas/latinas con iluminación artificial, ITA entre 15° y 38°
   const itaDeg = Math.atan((avgL - 48.0) / avgB) * (180 / Math.PI);
   const fitzpatrickPhototype = getCalibratedFitzpatrick(itaDeg, avgL);
 
-  // 2. Porcentaje realista de hiperpigmentación en la mejilla (entre 3% y 9%)
+  // 2. Porcentaje realista de hiperpigmentación en la mejilla (entre 2% y 15%)
   const rawSpotPct = (spotPixels / totalPixels) * 100;
-  const spotPercentage = Number((Math.min(18.5, Math.max(2.8, rawSpotPct * 0.45))).toFixed(1));
+  const spotPercentage = Number((Math.min(18.5, Math.max(2.2, rawSpotPct * 0.45))).toFixed(1));
   const globalSpotPct = Number((spotPercentage * 0.72).toFixed(1));
 
-  // 3. Estimación de Edad Biológica Cutánea Calibrada
+  // Cálculo de microtextura dérmica
   let varianceSum = 0;
   for (let i = 0; i < data.length; i += 4) {
     const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
@@ -569,9 +592,51 @@ function performCalibratedDermatologicalAnalysis(zone) {
   }
   const textureVariance = Math.sqrt(varianceSum / totalPixels);
 
-  // Calibración para adulto de 46 años con apariencia más joven: rango objetivo 40-43 años
-  let estimatedAge = Math.round(39 + (textureVariance - 14) * 0.45 + (60 - avgL) * 0.08);
-  estimatedAge = Math.min(48, Math.max(38, estimatedAge));
+  // 3. Estimación de Edad Biológica Cutánea Realista y Diferenciada
+  let estimatedAge = null;
+
+  // Opción 1: Red Neuronal ONNX MobileNetV3 (SPEC-001 de Ronal ejecutada en el navegador)
+  if (ageSession && typeof window.ort !== 'undefined') {
+    try {
+      const inputName = ageSession.inputNames[0];
+      const float32Data = new Float32Array(1 * 3 * 224 * 224);
+      // Tensor NCHW float32 normalizado [0, 1]
+      for (let i = 0; i < totalPixels; i++) {
+        float32Data[i] = data[i * 4] / 255.0; // Canal R
+        float32Data[totalPixels + i] = data[i * 4 + 1] / 255.0; // Canal G
+        float32Data[2 * totalPixels + i] = data[i * 4 + 2] / 255.0; // Canal B
+      }
+      const tensor = new ort.Tensor('float32', float32Data, [1, 3, 224, 224]);
+      const feeds = {};
+      feeds[inputName] = tensor;
+      const results = await ageSession.run(feeds);
+      const outName = ageSession.outputNames[0];
+      const rawAge = results[outName].data[0];
+      if (Number.isFinite(rawAge) && rawAge >= 15 && rawAge <= 90) {
+        estimatedAge = Math.round(rawAge);
+        console.log('[REGEN] Edad calculada por Red Neuronal ONNX MobileNetV3:', estimatedAge);
+      }
+    } catch (err) {
+      console.warn('[REGEN] Fallback a motor fotométrico dinámico:', err);
+    }
+  }
+
+  // Opción 2: Motor Fotométrico Dinámico (Sin techos artificiales, sensible a cada rostro)
+  if (estimatedAge === null) {
+    // Gradiente bio-dermatológico dinámico:
+    // - Base demográfica de referencia: 38.0 años
+    // - Micro-relieve y textura: +0.55 por cada punto sobre 21
+    // - Manchas y daño solar acumulado: +0.70 por cada % sobre 3.8%
+    // - Manto lipídico y luminosidad: +0.12 por menor reflexión
+    const textureOffset = (textureVariance - 21.0) * 0.55;
+    const spotOffset = (spotPercentage - 3.8) * 0.70;
+    const lumOffset = (58.0 - avgL) * 0.12;
+
+    const calculatedAge = Math.round(38.0 + textureOffset + spotOffset + lumOffset);
+    // Rango biológico realista completamente abierto: 18 a 78 años (sin techos forzados)
+    estimatedAge = Math.max(18, Math.min(78, calculatedAge));
+    console.log('[REGEN] Edad calculada por motor fotométrico dinámico:', estimatedAge, { textureVariance, spotPercentage, avgL });
+  }
 
   // 4. Indicadores de Apariencia Visual
   const shineVal = Math.min(88, Math.max(12, Math.round(avgL > 55 ? (avgL - 45) * 1.5 : 22)));
@@ -862,6 +927,7 @@ function renderRecommendations(items, age, group) {
 
 function boot() {
   setupEventListeners();
+  initONNXModels();
   initCamera();
 }
 
