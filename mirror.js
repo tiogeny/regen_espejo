@@ -1,4 +1,4 @@
-// REGEN · Espejo Inteligente de Diagnóstico Dermatoscópico (Client-Side Web v2.9)
+// REGEN · Espejo Inteligente de Diagnóstico Dermatoscópico (Client-Side Web v3.0)
 
 // Redirigir automáticamente a HTTPS si se entra por HTTP (la webcam requiere HTTPS)
 if (location.protocol === 'http:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
@@ -26,6 +26,13 @@ let handsDetector = null;
 let handsReady = false;
 let isProcessingHands = false;
 let lastHandsProcessTime = 0;
+let faceDetector = null;
+let faceReady = false;
+let faceDetected = false;
+let lastFaceSeenTime = 0;
+let faceBox = null;
+let isProcessingFace = false;
+let lastFaceProcessTime = 0;
 let clearStartTime = null;
 let ageSession = null;
 let isAgeSessionLoading = false;
@@ -117,6 +124,7 @@ async function initCamera() {
     $('instruction').textContent = 'Ponte frente al espejo. Señala tu mejilla con el dedo o toca la pantalla.';
 
     initMediaPipeHands();
+    initMediaPipeFace();
     initONNXModels();
     requestAnimationFrame(renderLoop);
   } catch (err) {
@@ -156,6 +164,110 @@ function initMediaPipeHands() {
   } else {
     setTimeout(initMediaPipeHands, 300);
   }
+}
+
+// 2b. Inicialización de MediaPipe Face Detection (Validación de Rostro Humano Real)
+function initMediaPipeFace() {
+  if (typeof window.FaceDetection !== 'undefined') {
+    try {
+      faceDetector = new window.FaceDetection({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_detection/${file}`
+      });
+      faceDetector.setOptions({
+        model: 'short',
+        minDetectionConfidence: 0.5
+      });
+      faceDetector.onResults(onFaceResults);
+      faceReady = true;
+      console.log("[REGEN] MediaPipe FaceDetection inicializado exitosamente.");
+    } catch (e) {
+      console.warn("[REGEN] Fallback en detección facial:", e);
+    }
+  } else {
+    setTimeout(initMediaPipeFace, 300);
+  }
+}
+
+function onFaceResults(results) {
+  const hadFace = faceDetected;
+  if (results.detections && results.detections.length > 0) {
+    faceDetected = true;
+    lastFaceSeenTime = performance.now();
+    faceBox = results.detections[0].boundingBox;
+    if (!hadFace && state === 'BUSCANDO') {
+      $('instruction').textContent = 'Ponte frente al espejo. Señala tu mejilla con el dedo o toca la pantalla.';
+    }
+  } else {
+    if (performance.now() - lastFaceSeenTime > 1200) {
+      faceDetected = false;
+      faceBox = null;
+      if (hadFace && state === 'BUSCANDO') {
+        $('instruction').textContent = '👤 Colócate frente al espejo para comenzar.';
+      }
+    }
+  }
+}
+
+function isFaceCurrentlyPresent() {
+  if (!faceReady) {
+    return true; // En el primer segundo de inicialización, no bloquear por asincronía de CDN
+  }
+  return faceDetected && (performance.now() - lastFaceSeenTime < 1500);
+}
+
+// Filtro bio-espectral de tejido dérmico humano (Rechaza asientos, pisos, ropa y objetos inanimados)
+function isSkinPixel(r, g, b) {
+  // 1. Verificación básica RGB (la piel humana absorbe más azul que rojo debido a la melanina/hemoglobina)
+  if (r < 35 || r <= b + 8) return false;
+  if (r <= g - 8) return false;
+
+  // 2. Espacio cromático YCbCr (Elipsoide de Chai-Ngan calibrado)
+  const cb = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
+  const cr = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
+  if (cb < 72 || cb > 138 || cr < 126 || cr > 188) return false;
+
+  // 3. Espacio perceptual CIE-Lab (a* representa hemoglobina dérmica, b* melanina)
+  const lab = rgb2lab(r, g, b);
+  if (lab.L < 12 || lab.L > 97) return false;
+  if (lab.a < 1.0 || lab.b < 2.0) return false;
+
+  return true;
+}
+
+function validateHumanSkinAtPoint(screenX, screenY, radius = 28) {
+  const cw = cameraCanvas.width, ch = cameraCanvas.height;
+  if (screenX < 0 || screenX >= cw || screenY < 0 || screenY >= ch) return false;
+
+  const sampleRadius = Math.max(12, Math.round(radius * 0.8));
+  const x0 = Math.max(0, Math.floor(screenX - sampleRadius));
+  const y0 = Math.max(0, Math.floor(screenY - sampleRadius));
+  const w = Math.min(cw - x0, sampleRadius * 2);
+  const h = Math.min(ch - y0, sampleRadius * 2);
+
+  if (w <= 0 || h <= 0) return false;
+
+  const imgData = ctx.getImageData(x0, y0, w, h);
+  const data = imgData.data;
+  let totalEvaluated = 0;
+  let skinCount = 0;
+  const r2 = sampleRadius * sampleRadius;
+
+  for (let dy = 0; dy < h; dy += 2) {
+    for (let dx = 0; dx < w; dx += 2) {
+      const distSq = (dx - sampleRadius) * (dx - sampleRadius) + (dy - sampleRadius) * (dy - sampleRadius);
+      if (distSq <= r2) {
+        totalEvaluated++;
+        const idx = (dy * w + dx) * 4;
+        if (isSkinPixel(data[idx], data[idx + 1], data[idx + 2])) {
+          skinCount++;
+        }
+      }
+    }
+  }
+
+  if (totalEvaluated === 0) return false;
+  const skinRatio = skinCount / totalEvaluated;
+  return skinRatio >= 0.38; // Requiere al menos 38% de tejido dérmico humano en el círculo
 }
 
 // 2b. Inicialización de Red Neuronal ONNX MobileNetV3 (SPEC-001 de Ronal)
@@ -247,7 +359,29 @@ function onHandResults(results) {
 
 // Maneja la fijación gradual cuando el dedo apunta a la mejilla
 function handlePointingInteraction(x, y, now) {
+  // 1. Validar que haya un rostro humano frente a la pantalla
+  if (!isFaceCurrentlyPresent()) {
+    if (state === 'FIJANDO_DEDO') {
+      state = 'BUSCANDO';
+      targetZone = null;
+      $('scan-progress').value = 0;
+    }
+    $('instruction').textContent = '👤 Colócate frente al espejo para comenzar.';
+    return;
+  }
+
   const radius = 28;
+
+  // 2. Validar que la zona señalada contenga tejido dérmico humano (rechaza taxi, suelo, ropa)
+  if (!validateHumanSkinAtPoint(x, y, radius)) {
+    if (state === 'FIJANDO_DEDO') {
+      state = 'BUSCANDO';
+      targetZone = null;
+      $('scan-progress').value = 0;
+    }
+    $('instruction').textContent = '⚠️ Señala tu mejilla o piel (objeto no dérmico detectado).';
+    return;
+  }
 
   if (state !== 'FIJANDO_DEDO' || !targetZone) {
     state = 'FIJANDO_DEDO';
@@ -277,6 +411,14 @@ function handlePointingInteraction(x, y, now) {
 }
 
 function lockZoneForScan(x, y, now) {
+  if (!isFaceCurrentlyPresent() || !validateHumanSkinAtPoint(x, y, 28)) {
+    state = 'BUSCANDO';
+    targetZone = null;
+    $('instruction').textContent = '⚠️ Señala tu piel o mejilla (objeto no dérmico detectado).';
+    $('scan-progress').value = 0;
+    return;
+  }
+
   playLockChime();
   state = 'ESPERANDO_DESPEJE';
   targetZone = { x, y, radius: 28, lockTime: now, progress: 1.0 };
@@ -310,7 +452,7 @@ function renderLoop() {
     drawCameraBase();
 
     const now = performance.now();
-    // 2. Enviar la imagen limpia del canvas a MediaPipe
+    // 2. Enviar la imagen limpia del canvas a MediaPipe Hands (cada 35ms)
     if (handsReady && handsDetector && !isProcessingHands && (now - lastHandsProcessTime >= 35)) {
       isProcessingHands = true;
       lastHandsProcessTime = now;
@@ -318,6 +460,17 @@ function renderLoop() {
         .catch((e) => console.warn('[REGEN] Error procesando manos:', e))
         .finally(() => {
           isProcessingHands = false;
+        });
+    }
+
+    // 2b. Enviar imagen a MediaPipe FaceDetection (cada 120ms para rendimiento óptimo)
+    if (faceReady && faceDetector && !isProcessingFace && (now - lastFaceProcessTime >= 120)) {
+      isProcessingFace = true;
+      lastFaceProcessTime = now;
+      faceDetector.send({ image: cameraCanvas })
+        .catch((e) => console.warn('[REGEN] Error procesando rostro:', e))
+        .finally(() => {
+          isProcessingFace = false;
         });
     }
 
@@ -517,6 +670,22 @@ function drawZoneHighlight(zone) {
 
 // 5. Disparo del Análisis Clínico en la Coordenada Exacta
 function triggerAnalysisAtPoint(screenX, screenY, label = 'Mejilla derecha') {
+  if (!isFaceCurrentlyPresent()) {
+    state = 'BUSCANDO';
+    targetZone = null;
+    $('instruction').textContent = '👤 Colócate frente al espejo para comenzar.';
+    $('scan-progress').value = 0;
+    return;
+  }
+
+  if (!validateHumanSkinAtPoint(screenX, screenY, 28)) {
+    state = 'BUSCANDO';
+    targetZone = null;
+    $('instruction').textContent = '⚠️ Señala tu piel o mejilla (objeto no dérmico detectado).';
+    $('scan-progress').value = 0;
+    return;
+  }
+
   state = 'ANALIZANDO';
   scanLineY = 0;
   $('instruction').textContent = 'Analizando zona cutánea…';
@@ -797,6 +966,17 @@ function selectZoneAtScreenPoint(clientX, clientY) {
   const rect = cameraCanvas.getBoundingClientRect();
   const x = ((clientX - rect.left) / rect.width) * cameraCanvas.width;
   const y = ((clientY - rect.top) / rect.height) * cameraCanvas.height;
+
+  if (!isFaceCurrentlyPresent()) {
+    $('instruction').textContent = '👤 Colócate frente al espejo para comenzar.';
+    return;
+  }
+
+  if (!validateHumanSkinAtPoint(x, y, 28)) {
+    $('instruction').textContent = '⚠️ Toca sobre tu mejilla o piel (objeto no dérmico detectado).';
+    return;
+  }
+
   triggerAnalysisAtPoint(x, y, 'Zona señalada al tacto');
 }
 
@@ -958,6 +1138,7 @@ function boot() {
   setupEventListeners();
   initONNXModels();
   initCamera();
+  initMediaPipeFace();
 }
 
 if (document.readyState === 'loading') {
