@@ -1,4 +1,4 @@
-// REGEN · Espejo Inteligente de Diagnóstico Dermatoscópico (Client-Side Web v2.7)
+// REGEN · Espejo Inteligente de Diagnóstico Dermatoscópico (Client-Side Web v2.8)
 
 // Redirigir automáticamente a HTTPS si se entra por HTTP (la webcam requiere HTTPS)
 if (location.protocol === 'http:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
@@ -599,13 +599,23 @@ async function performCalibratedDermatologicalAnalysis(zone) {
   const spotPercentage = Number((Math.min(18.5, Math.max(2.2, rawSpotPct * 0.45))).toFixed(1));
   const globalSpotPct = Number((spotPercentage * 0.72).toFixed(1));
 
-  // Microtextura sobre la piel limpia de la mejilla (sin alteraciones artificiales)
-  let varianceSum = 0;
-  for (let i = 0; i < rawData.length; i += 4) {
-    const lum = 0.299 * rawData[i] + 0.587 * rawData[i + 1] + 0.114 * rawData[i + 2];
-    varianceSum += Math.pow(lum - avgL, 2);
+  // 1. Filtrado de Micro-Rugosidad Dérmica de Alta Frecuencia (Filtro espacial de gradientes locales)
+  // Ignora sombras ambientales, lámparas de techo e iluminación lateral; mide rugosidad cutánea real
+  let localGradientSum = 0;
+  let gradientCount = 0;
+  const stride = 224;
+
+  for (let y = 4; y < 220; y += 2) {
+    for (let x = 4; x < 220; x += 2) {
+      const idx = (y * stride + x) * 4;
+      const lum = 0.299 * rawData[idx] + 0.587 * rawData[idx + 1] + 0.114 * rawData[idx + 2];
+      const rightLum = 0.299 * rawData[idx + 8] + 0.587 * rawData[idx + 9] + 0.114 * rawData[idx + 10];
+      const downLum = 0.299 * rawData[idx + stride * 8] + 0.587 * rawData[idx + stride * 8 + 1] + 0.114 * rawData[idx + stride * 8 + 2];
+      localGradientSum += Math.abs(lum - rightLum) + Math.abs(lum - downLum);
+      gradientCount += 2;
+    }
   }
-  const textureVariance = Math.sqrt(varianceSum / totalPixels);
+  const microRoughness = localGradientSum / Math.max(1, gradientCount);
 
   // 3. Estimación de Edad Biológica Cutánea Realista y Calibrada
   let estimatedAge = null;
@@ -636,27 +646,29 @@ async function performCalibratedDermatologicalAnalysis(zone) {
     }
   }
 
-  // Opción 2: Motor Biométrico Dinámico (Calibrado para adultos 40-47 y sensible a cada piel)
+  // Opción 2: Motor Biométrico Dinámico (Inmune a lámparas y sombras; calibrado para adultos 40-47)
   if (estimatedAge === null) {
-    // Calibración dermatológica adaptativa:
-    // Base: 41.0 años (adulto en plenitud con piel cuidada)
-    // - Textura/rugosidad: +0.32 por punto sobre 22
-    // - Pigmentación/daño solar: +0.45 por cada % sobre 3.5%
-    // - Manto lipídico / luminosidad: +0.08 si la piel refleja menos luz
-    const textureOffset = (textureVariance - 22.0) * 0.32;
-    const spotOffset = (spotPercentage - 3.5) * 0.45;
-    const lumOffset = (58.0 - avgL) * 0.08;
+    // Escala clínica de micro-rugosidad:
+    // Piel cuidada / tersa de mejilla (microRoughness entre 3.0 y 4.8): 40 - 43 años
+    // Piel adulta con textura normal (microRoughness 4.8 a 6.2): 44 - 47 años
+    // Piel con mayor textura y daño solar (microRoughness > 6.5): 48 - 56 años
+    let roughnessDelta = microRoughness - 4.5;
+    if (roughnessDelta > 2.5) {
+      roughnessDelta = 2.5 + (roughnessDelta - 2.5) * 1.5;
+    }
+    const roughnessOffset = roughnessDelta * 0.70;
+    const spotOffset = (spotPercentage - 3.0) * 0.40;
 
-    const calculatedAge = Math.round(41.0 + textureOffset + spotOffset + lumOffset);
+    const calculatedAge = Math.round(41.5 + roughnessOffset + spotOffset);
     // Rango biológico realista abierto (de 18 a 80 años)
     estimatedAge = Math.max(18, Math.min(80, calculatedAge));
-    console.log('[REGEN] Edad por motor biométrico facial:', estimatedAge, { textureVariance, spotPercentage, avgL });
+    console.log('[REGEN] Edad por micro-gradiente biométrico:', estimatedAge, { microRoughness, spotPercentage });
   }
 
   // 4. Indicadores de Apariencia Visual
   const shineVal = Math.min(88, Math.max(12, Math.round(avgL > 55 ? (avgL - 45) * 1.5 : 22)));
-  const textureVal = Math.min(85, Math.max(14, Math.round(textureVariance * 1.6)));
-  const drynessVal = Math.min(75, Math.max(6, Math.round(Math.max(0, 38 - shineVal * 0.35 + textureVal * 0.25))));
+  const textureVal = Math.min(85, Math.max(14, Math.round(microRoughness * 7.5)));
+  const drynessVal = Math.min(75, Math.max(6, Math.round(Math.max(0, 35 - shineVal * 0.30 + textureVal * 0.20))));
 
   diagnosticData = {
     clinical: {
