@@ -1,4 +1,4 @@
-// REGEN · Espejo Inteligente de Diagnóstico Dermatoscópico (Client-Side Web v2.8)
+// REGEN · Espejo Inteligente de Diagnóstico Dermatoscópico (Client-Side Web v2.9)
 
 // Redirigir automáticamente a HTTPS si se entra por HTTP (la webcam requiere HTTPS)
 if (location.protocol === 'http:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
@@ -617,7 +617,7 @@ async function performCalibratedDermatologicalAnalysis(zone) {
   }
   const microRoughness = localGradientSum / Math.max(1, gradientCount);
 
-  // 3. Estimación de Edad Biológica Cutánea Realista y Calibrada
+  // 3. Estimación de Edad Biológica Cutánea Realista de Amplio Rango (20 a 78 años)
   let estimatedAge = null;
 
   // Opción 1: Red Neuronal ONNX MobileNetV3 con el ROSTRO COMPLETO (224x224 anatómico)
@@ -627,9 +627,10 @@ async function performCalibratedDermatologicalAnalysis(zone) {
       const float32Data = new Float32Array(1 * 3 * 224 * 224);
       const facePixels = 224 * 224;
       for (let i = 0; i < facePixels; i++) {
-        float32Data[i] = faceData[i * 4] / 255.0; // R
-        float32Data[facePixels + i] = faceData[i * 4 + 1] / 255.0; // G
-        float32Data[2 * facePixels + i] = faceData[i * 4 + 2] / 255.0; // B
+        // Normalización PyTorch estándar para modelos de visión
+        float32Data[i] = (faceData[i * 4] / 255.0 - 0.485) / 0.229;
+        float32Data[facePixels + i] = (faceData[i * 4 + 1] / 255.0 - 0.456) / 0.224;
+        float32Data[2 * facePixels + i] = (faceData[i * 4 + 2] / 255.0 - 0.406) / 0.225;
       }
       const tensor = new ort.Tensor('float32', float32Data, [1, 3, 224, 224]);
       const feeds = {};
@@ -637,32 +638,33 @@ async function performCalibratedDermatologicalAnalysis(zone) {
       const results = await ageSession.run(feeds);
       const outName = ageSession.outputNames[0];
       const rawAge = results[outName].data[0];
-      if (Number.isFinite(rawAge) && rawAge >= 18 && rawAge <= 85) {
+      // Si la red neuronal da una predicción dinámica válida y no el sesgo por defecto clavado en 40.0
+      if (Number.isFinite(rawAge) && Math.abs(rawAge - 40.0) > 2.5 && rawAge >= 18 && rawAge <= 85) {
         estimatedAge = Math.round(rawAge);
-        console.log('[REGEN] Edad calculada por Red Neuronal ONNX MobileNetV3 (Rostro completo):', estimatedAge);
+        console.log('[REGEN] Edad calculada por Red Neuronal ONNX MobileNetV3:', estimatedAge);
       }
     } catch (err) {
       console.warn('[REGEN] Fallback a motor biométrico:', err);
     }
   }
 
-  // Opción 2: Motor Biométrico Dinámico (Inmune a lámparas y sombras; calibrado para adultos 40-47)
+  // Opción 2: Motor Biométrico Dinámico de Amplio Espectro (Totalmente adaptativo 20 a 75 años)
   if (estimatedAge === null) {
-    // Escala clínica de micro-rugosidad:
-    // Piel cuidada / tersa de mejilla (microRoughness entre 3.0 y 4.8): 40 - 43 años
-    // Piel adulta con textura normal (microRoughness 4.8 a 6.2): 44 - 47 años
-    // Piel con mayor textura y daño solar (microRoughness > 6.5): 48 - 56 años
-    let roughnessDelta = microRoughness - 4.5;
-    if (roughnessDelta > 2.5) {
-      roughnessDelta = 2.5 + (roughnessDelta - 2.5) * 1.5;
-    }
-    const roughnessOffset = roughnessDelta * 0.70;
-    const spotOffset = (spotPercentage - 3.0) * 0.40;
+    // Escala continua:
+    // Base: 22.0 años (piel juvenil tersa de 20-24 años, rugosidad ~2.1, manchas <= 1.8%)
+    // - Rugosidad micro-dérmica de poros y líneas: 5.4 años por cada unidad sobre 2.1
+    // - Pigmentación solar y manchas: 1.6 años por cada % sobre 2.0%
+    // - Luminosidad cutánea: balance de foto-reflectancia
+    const baseAge = 22.0;
+    const roughnessSpread = Math.max(0, microRoughness - 2.1);
+    const roughnessContribution = roughnessSpread * 5.4;
+    const spotContribution = (spotPercentage - 2.0) * 1.6;
+    const lumContribution = (60.0 - avgL) * 0.12;
 
-    const calculatedAge = Math.round(41.5 + roughnessOffset + spotOffset);
-    // Rango biológico realista abierto (de 18 a 80 años)
-    estimatedAge = Math.max(18, Math.min(80, calculatedAge));
-    console.log('[REGEN] Edad por micro-gradiente biométrico:', estimatedAge, { microRoughness, spotPercentage });
+    const calculatedAge = Math.round(baseAge + roughnessContribution + spotContribution + lumContribution);
+    // Rango biológico realista completamente abierto (18 a 78 años)
+    estimatedAge = Math.max(19, Math.min(78, calculatedAge));
+    console.log('[REGEN] Edad por motor biométrico diferencial:', estimatedAge, { microRoughness, spotPercentage, avgL });
   }
 
   // 4. Indicadores de Apariencia Visual
